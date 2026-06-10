@@ -25,8 +25,11 @@ https://github.com/raulbalestra/strapi-plugin-mcp-chat
 ## Install
 
 ```bash
-npm install strapi-plugin-mcp-chat
+# Straight from GitHub (not on npm yet):
+npm install github:raulbalestra/strapi-plugin-mcp-chat
 ```
+
+> Or just try the ready-to-run [Launchpad demo](https://github.com/raulbalestra/launchpad-mcp-chat) (the plugin is vendored there).
 
 ### 1. Enable this plugin
 
