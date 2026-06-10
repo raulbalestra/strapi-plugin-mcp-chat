@@ -339,22 +339,31 @@ export default ({ strapi }: { strapi: any }) => ({
     ];
 
     // ── Ferramentas de MCP (vários servidores) ───────────────────────────────
-    // 1) Strapi MCP (LEITURA da estrutura) — sempre, na própria instância.
+    // 1) Strapi MCP NATIVO (/mcp, requer STRAPI_ADMIN_TOKEN) — tools de conteúdo.
     // 2) Playwright MCP (CONTROLE DE BROWSER) — só se PLAYWRIGHT_MCP_URL existir.
     //    Roteamos cada tool para o client que a expôs via `mcpByTool`.
     const mcpByTool: Record<string, McpClient> = {};
     const mcpTools: any[] = [];
 
-    const mcpSources: Array<{ url?: string; name: string }> = [
-      { name: 'strapi' }, // URL default (MCP da própria Strapi)
+    const mcpSources: Array<{ url?: string; name: string; token?: string }> = [
+      // URL default (/mcp nativo); token de admin exigido pelo MCP nativo.
+      { name: 'strapi', token: process.env.STRAPI_ADMIN_TOKEN },
     ];
     if (process.env.PLAYWRIGHT_MCP_URL) {
       mcpSources.push({ url: process.env.PLAYWRIGHT_MCP_URL, name: 'playwright' });
     }
 
+    if (!process.env.STRAPI_ADMIN_TOKEN) {
+      strapi.log.warn(
+        '[mcp-chat] STRAPI_ADMIN_TOKEN não definido — o MCP nativo (/mcp) exige um admin token. ' +
+          'O chat seguirá com as ferramentas locais (buscar_texto/editar_campo/publicar). ' +
+          'Crie um admin token no painel e adicione STRAPI_ADMIN_TOKEN ao .env para habilitar as tools do MCP.'
+      );
+    }
+
     for (const src of mcpSources) {
       try {
-        const client = new McpClient(src.url, src.name);
+        const client = new McpClient(src.url, src.name, src.token);
         await client.init();
         const list = await client.listTools();
         for (const t of list) {

@@ -19,50 +19,48 @@ https://github.com/raulbalestra/strapi-plugin-mcp-chat
 
 ## Requirements
 
-- **Strapi `^5`**
-- An **MCP server** exposed by your Strapi instance — this plugin uses [`@sensinum/strapi-plugin-mcp`](https://www.npmjs.com/package/@sensinum/strapi-plugin-mcp) for that (the read side: it lets the AI inspect your content structure).
+- **Strapi `>= 5.47.0`** — required for the built-in [native MCP server](https://docs.strapi.io/cms/features/strapi-mcp-server) that this plugin consumes.
 - An **OpenAI API key** (used server-side only).
 
 ## Install
 
 ```bash
-npm install strapi-plugin-mcp-chat @sensinum/strapi-plugin-mcp
+npm install strapi-plugin-mcp-chat
 ```
 
-If you hit a peer-dependency mismatch on the MCP SDK, pin it in your app's `package.json`:
+### 1. Enable Strapi's native MCP server
 
-```json
-{
-  "overrides": {
-    "@sensinum/strapi-plugin-mcp": {
-      "@modelcontextprotocol/sdk": "1.18.0"
-    }
-  }
-}
+`config/server.ts` (or `.js`):
+
+```ts
+export default ({ env }) => ({
+  // ...your existing server config
+  mcp: {
+    enabled: true, // serves /mcp (Streamable HTTP, admin-token authenticated)
+  },
+});
 ```
 
-### 1. Enable the plugins
+### 2. Enable this plugin
 
 `config/plugins.ts` (or `.js`):
 
 ```ts
 export default () => ({
-  // MCP server of your own instance (read side).
-  mcp: {
-    enabled: true,
-    config: {
-      session: { type: 'memory' },
-      allowedIPs: ['127.0.0.1', '::1'],
-    },
-  },
-  // This plugin (chat + voice + preview).
   'mcp-chat': {
     enabled: true,
   },
 });
 ```
 
-### 2. Raise the body size limit + allow the preview iframe
+### 3. Create an Admin token
+
+The native `/mcp` endpoint authenticates with an **Admin token** (not an API Token).
+In the admin panel go to **Settings → Admin Tokens**, create one, copy the value, and
+put it in your `.env` as `STRAPI_ADMIN_TOKEN` (see below). The MCP session inherits that
+token's permissions — so the tools the AI can use mirror what the token is allowed to do.
+
+### 4. Raise the body size limit + allow the preview iframe
 
 The chat can send a screenshot of your screen (base64) in the request body, so the
 default ~100 kb limit must be raised. If you use the live preview, also allow the
@@ -96,24 +94,28 @@ export default [
 ];
 ```
 
-### 3. Environment variables
+### 5. Environment variables
 
 ```bash
 # Required — the chat and voice features fail without it.
 OPENAI_API_KEY=sk-...
 
+# Admin token for the native /mcp server (Settings > Admin Tokens). Without it,
+# the chat still works using its local content tools, but the MCP tools are off.
+STRAPI_ADMIN_TOKEN=
+
 # Optional.
-OPENAI_CHAT_MODEL=gpt-4o                                   # default: gpt-4o
-MCP_URL=http://localhost:1337/api/mcp/streamable           # your instance's MCP endpoint
-PLAYWRIGHT_MCP_URL=http://localhost:8931/mcp               # enables browser control
-STRAPI_ADMIN_URL=http://localhost:1337/admin               # used by browser control
-CLIENT_URL=http://localhost:3000                           # frontend origin (for the preview iframe CSP)
+OPENAI_CHAT_MODEL=gpt-4o                       # default: gpt-4o
+MCP_URL=http://localhost:1337/mcp              # native MCP endpoint (match your PORT)
+PLAYWRIGHT_MCP_URL=http://localhost:8931/mcp   # enables browser control
+STRAPI_ADMIN_URL=http://localhost:1337/admin   # used by browser control
+CLIENT_URL=http://localhost:3000               # frontend origin (for the preview iframe CSP)
 ```
 
-> **The OpenAI key lives only in the server `.env`** and is never exposed to the
-> browser. The chat endpoints require an authenticated admin session.
+> **The OpenAI key and admin token live only in the server `.env`** and are never
+> exposed to the browser. The chat endpoints require an authenticated admin session.
 
-### 4. Rebuild & run
+### 6. Rebuild & run
 
 ```bash
 npm run build && npm run develop
@@ -162,14 +164,21 @@ framework — just post `{ type: 'preview:location', href: location.href }` to `
 ```
 Admin (floating chat / full page)
   └─ POST /mcp-chat/message ─► chat service (agent loop, OpenAI)
-        ├─ READ tools   ─► MCP server (@sensinum/strapi-plugin-mcp) — structure
-        ├─ WRITE tools  ─► Strapi Document Service
+        ├─ MCP tools    ─► native Strapi MCP server (/mcp, Bearer admin token)
+        │                   — content tools generated from your schema
+        ├─ LOCAL tools  ─► Strapi Document Service (the plugin's value-add)
         │     buscar_texto  → deep, recursive search (components + dynamic zones), returns a `path`
         │     editar_campo  → edits the field at that `path`, re-saving the whole top attribute
         │     publicar      → publishes the entry
         └─ (optional) browser_* ─► Playwright MCP
   └─ POST /mcp-chat/stt · /mcp-chat/tts ─► Whisper / OpenAI TTS
 ```
+
+The plugin connects to Strapi's **native** MCP server (`/mcp`) as an MCP client using
+your `STRAPI_ADMIN_TOKEN`, so the AI gets the built-in content tools. On top of that it
+adds its own local tools for the surgical, deep-nested text editing that the generic
+tools don't cover. If the token is absent, the MCP tools are simply skipped and the
+local tools keep working.
 
 `buscar_texto` returns matches with a `path` like `["dynamic_zone", 0, "heading"]`.
 `editar_campo` takes that same `path`, deep-fetches the entry, mutates the leaf, and
@@ -197,10 +206,11 @@ single spot.
 
 ## Security
 
-- The OpenAI key is read from the server environment only.
+- The OpenAI key and the `STRAPI_ADMIN_TOKEN` are read from the server environment only.
 - Chat / STT / TTS routes are admin-authenticated.
-- The agent can edit and publish content — give the plugin only to trusted editors,
-  and keep `allowedIPs` tight on the MCP server in production.
+- The native MCP session is scoped to the admin token's permissions — scope the token to
+  only what editors should be able to change.
+- The agent can edit and publish content — give the plugin only to trusted editors.
 
 ## License
 
