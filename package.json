@@ -1,0 +1,73 @@
+{
+  "name": "strapi-plugin-mcp-chat",
+  "version": "0.1.0",
+  "description": "AI chat inside the Strapi 5 admin that reads and edits your content (incl. components & dynamic zones) via MCP, with voice and a side-by-side live preview.",
+  "keywords": [
+    "strapi",
+    "strapi-plugin",
+    "mcp",
+    "model-context-protocol",
+    "ai",
+    "chatgpt",
+    "openai",
+    "live-preview",
+    "content-management"
+  ],
+  "homepage": "https://github.com/raulbalestra/strapi-plugin-mcp-chat#readme",
+  "bugs": {
+    "url": "https://github.com/raulbalestra/strapi-plugin-mcp-chat/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/raulbalestra/strapi-plugin-mcp-chat.git"
+  },
+  "license": "MIT",
+  "author": "Raul Balestra",
+  "strapi": {
+    "kind": "plugin",
+    "name": "mcp-chat",
+    "displayName": "MCP Chat",
+    "description": "Chat with an AI that sees and operates your Strapi via MCP."
+  },
+  "scripts": {
+    "build:server": "esbuild server/src/index.ts --bundle --platform=node --format=cjs --target=node18 --packages=external --outfile=dist/server/index.js",
+    "build": "npm run build:server",
+    "prepublishOnly": "npm run build:server"
+  },
+  "exports": {
+    "./package.json": "./package.json",
+    "./strapi-admin": {
+      "source": "./admin/src/index.tsx",
+      "import": "./admin/src/index.tsx",
+      "require": "./admin/src/index.tsx",
+      "default": "./admin/src/index.tsx"
+    },
+    "./strapi-server": {
+      "source": "./server/src/index.ts",
+      "import": "./dist/server/index.js",
+      "require": "./dist/server/index.js",
+      "default": "./dist/server/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "admin",
+    "server",
+    "README.md",
+    "LICENSE"
+  ],
+  "peerDependencies": {
+    "@strapi/strapi": "^5.0.0",
+    "react": "^18.0.0 || ^19.0.0",
+    "react-dom": "^18.0.0 || ^19.0.0",
+    "react-router-dom": "^6.0.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0",
+    "typescript": "^5"
+  },
+  "engines": {
+    "node": ">=18.0.0 <=22.x.x",
+    "npm": ">=6.0.0"
+  }
+}
