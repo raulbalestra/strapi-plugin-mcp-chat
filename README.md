@@ -199,7 +199,9 @@ The plugin follows the documented Strapi 5 plugin APIs:
   authenticated admin session.
 - **MCP** — tools are registered with `strapi.ai.mcp.registerTool` during `register()`
   (the documented extension point), using `z` from `@strapi/utils` for the schemas and
-  `auth.policies` (content-manager read/update/publish) for RBAC.
+  `auth.policies` (content-manager read/update/publish) for RBAC. They're organized in a
+  modular `server/src/mcp/` (one file per tool in `tools/`, aggregated and looped) following
+  the structure from [Paul Bratslavsky's MCP tool-extension example](https://github.com/PaulBratslavsky/strapi-mcp-demo-and-tool-extension).
 - **Admin** — `register()` uses only documented APIs (`app.addMenuLink`, `app.registerPlugin`).
 
 One intentional deviation: the **global floating chat** is mounted via its own React root
