@@ -13,7 +13,7 @@ https://github.com/raulbalestra/strapi-plugin-mcp-chat
 - 🤖 **AI chat in the admin** — a floating widget on every screen + a full-page view. Runs an agent loop on the OpenAI Chat Completions API.
 - ✏️ **Edits real content via MCP + Document Service** — `buscar_texto` finds a phrase across **all** content-types, single types, **components and dynamic zones** (recursive); `editar_campo` updates it (preserving the other components); `publicar` publishes.
 - 🎙️ **Voice** — record a request (Whisper STT) and hear replies (OpenAI TTS).
-- 👁️ **Side-by-side live preview** — docked panel that shrinks the admin and shows your frontend; reloads after each edit and **stays on the same page + scroll position** (with the optional preview bridge below).
+- 👁️ **Side-by-side preview panel** — the plugin's own docked iframe that shrinks the admin and shows your frontend; reloads after each edit and **stays on the same page + scroll position** (with the optional preview bridge below). This is a custom panel, *not* Strapi's official Live Preview (which is a Growth/Enterprise feature) — it works on any plan, including Community, and complements the official Preview if you have it configured.
 - 🖥️ **Optional browser control** — if a [Playwright MCP](https://github.com/microsoft/playwright-mcp) server is reachable, the agent can drive a real browser to verify changes.
 - 🌐 Bilingual UI/prompts (PT / EN).
 
