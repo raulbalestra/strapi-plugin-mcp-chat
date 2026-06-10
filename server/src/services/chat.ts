@@ -1,19 +1,20 @@
 /**
  * Serviço de chat: roda um loop de agente com a API da OpenAI (Chat Completions).
  *
- * Ferramentas disponíveis para a IA:
- *  - LEITURA (via MCP da própria instância): inspeciona content-types, componentes,
- *    serviços e info do Strapi.
- *  - ESCRITA (locais, via Document Service do Strapi): `buscar_texto` acha em qual
- *    content-type/single-type/campo está uma palavra; `editar_campo` troca o valor;
- *    `publicar` publica a entrada (deixa visível no site).
+ * Ferramentas da IA:
+ *  - CONTEÚDO (in-process, via Document Service): `buscar_texto` acha onde uma
+ *    palavra está (inclusive aninhada em componentes/dynamic zones), `editar_campo`
+ *    troca o valor pelo `path`, `publicar` publica. São as MESMAS funções
+ *    registradas no MCP nativo da Strapi (server/src/mcp.ts) — aqui chamadas
+ *    direto, sem HTTP nem token.
+ *  - BROWSER (opcional): Playwright MCP, só se PLAYWRIGHT_MCP_URL existir.
  *
- * Suporta entrada multimodal (frame da tela compartilhada vai como imagem) e
- * idioma configurável (pt | en) — afeta o prompt e o idioma das respostas.
+ * Suporta entrada multimodal (frame da tela vai como imagem) e idioma (pt | en).
  * Usa OPENAI_API_KEY. Modelo via OPENAI_CHAT_MODEL (default gpt-4o).
  */
 
 import { McpClient } from '../mcp-client';
+import { createContentTools, openAiToolSpecs } from '../content-tools';
 
 type ChatMessage = { role: 'user' | 'assistant'; content: string };
 type Lang = 'pt' | 'en';
@@ -32,9 +33,7 @@ const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
 const SYSTEM: Record<Lang, string> = {
   pt: `Você é um assistente embutido no admin do Strapi 5 deste projeto. Você NÃO é só um guia: você consegue EDITAR e PUBLICAR conteúdo de verdade através das ferramentas.
 
-Ferramentas de LEITURA (MCP) descrevem content-types, componentes, serviços e info da instância — use para entender a estrutura.
-
-Ferramentas de ESCRITA:
+Ferramentas de conteúdo:
 - buscar_texto({termo}): procura uma palavra ou frase em TODOS os content-types, single types, COMPONENTES e DYNAMIC ZONES (recursivo, por substring). Retorna uma lista; cada item tem uid, documentId, "path" (caminho até o campo, ex.: ["dynamic_zone",2,"heading"]), campo e valor_atual. Use SEMPRE isto primeiro — NÃO peça ao usuário onde está, ache sozinho. Busque um trecho distintivo e NÃO inclua rótulos que o preview adiciona, como "(Draft)"/"(Rascunho)".
 - editar_campo({uid, documentId, path, novo_valor}): troca o valor de um campo (salva como rascunho). Passe o "path" EXATAMENTE como veio de buscar_texto.
 - publicar({uid, documentId}): publica a entrada, deixando a mudança visível no site.
@@ -51,9 +50,7 @@ Se o usuário compartilhar a tela, uma imagem é anexada à última mensagem —
 Seja objetivo e acionável. Responda SEMPRE em português.`,
   en: `You are an assistant embedded in this project's Strapi 5 admin. You are NOT just a guide: you can actually EDIT and PUBLISH content through your tools.
 
-READ tools (MCP) describe content-types, components, services and instance info — use them to understand the structure.
-
-WRITE tools:
+Content tools:
 - buscar_texto({termo}): searches a word or phrase across ALL content-types, single types, COMPONENTS and DYNAMIC ZONES (recursive, substring). Returns a list; each item has uid, documentId, "path" (the path to the field, e.g. ["dynamic_zone",2,"heading"]), field and current value. ALWAYS use this first — do NOT ask the user where it is, find it yourself. Search a distinctive snippet and do NOT include labels the preview adds, like "(Draft)".
 - editar_campo({uid, documentId, path, novo_valor}): replaces a field value (saved as draft). Pass the "path" EXACTLY as returned by buscar_texto.
 - publicar({uid, documentId}): publishes the entry, making the change visible on the site.
@@ -80,303 +77,31 @@ export default ({ strapi }: { strapi: any }) => ({
     }
     const language: Lang = lang === 'en' ? 'en' : 'pt';
 
-    // ── Ferramentas de ESCRITA (Document Service do Strapi) ──────────────────
-    const apiContentTypes = () =>
-      Object.values(strapi.contentTypes as Record<string, any>).filter((ct: any) =>
-        ct.uid?.startsWith('api::')
-      );
-    const TEXTUAL = ['string', 'text', 'richtext'];
-
-    // Schema de atributos de um content-type OU componente, pelo uid.
-    const attrsOf = (uid: string): Record<string, any> =>
-      (strapi.contentTypes?.[uid]?.attributes ||
-        strapi.components?.[uid]?.attributes ||
-        {}) as Record<string, any>;
-
-    // Monta populate profundo: components (simples/repetíveis), dynamic zones
-    // (com `on` por componente) e mídia. `seen` evita recursão infinita.
-    const buildPopulate = (attributes: Record<string, any>, seen = new Set<string>()): any => {
-      const populate: any = {};
-      for (const [name, a] of Object.entries(attributes) as any[]) {
-        if (a.type === 'component' && a.component) {
-          const sub = seen.has(a.component)
-            ? {}
-            : buildPopulate(attrsOf(a.component), new Set(seen).add(a.component));
-          populate[name] = Object.keys(sub).length ? { populate: sub } : true;
-        } else if (a.type === 'dynamiczone') {
-          const on: any = {};
-          for (const comp of a.components || []) {
-            const sub = seen.has(comp)
-              ? {}
-              : buildPopulate(attrsOf(comp), new Set(seen).add(comp));
-            on[comp] = Object.keys(sub).length ? { populate: sub } : true;
-          }
-          populate[name] = { on };
-        } else if (a.type === 'media' || a.type === 'relation') {
-          // Mídia e relações são populadas p/ preservá-las no round-trip de
-          // escrita (são reduzidas a id(s) por sanitizeAttr na hora de gravar).
-          populate[name] = true;
-        }
-      }
-      return populate;
-    };
-
-    // Anda recursivamente no valor populado coletando campos textuais que casam
-    // com a busca, guardando o `path` (ex.: ['dynamic_zone', 2, 'heading']).
-    const walkFind = (
-      node: any,
-      attributes: Record<string, any>,
-      basePath: (string | number)[],
-      needle: string,
-      collect: (path: (string | number)[], campo: string, valor: string) => void
-    ) => {
-      if (!node || typeof node !== 'object') return;
-      for (const [name, a] of Object.entries(attributes) as any[]) {
-        const v = node[name];
-        if (v == null) continue;
-        const path = [...basePath, name];
-        if (TEXTUAL.includes(a.type)) {
-          if (typeof v === 'string' && v.toLowerCase().includes(needle)) {
-            collect(path, name, v);
-          }
-        } else if (a.type === 'component' && a.component) {
-          const sub = attrsOf(a.component);
-          if (a.repeatable && Array.isArray(v)) {
-            v.forEach((item, i) => walkFind(item, sub, [...path, i], needle, collect));
-          } else {
-            walkFind(v, sub, path, needle, collect);
-          }
-        } else if (a.type === 'dynamiczone' && Array.isArray(v)) {
-          v.forEach((item, i) => {
-            if (item?.__component) {
-              walkFind(item, attrsOf(item.__component), [...path, i], needle, collect);
-            }
-          });
-        }
-      }
-    };
-
-    const buscarTexto = async (termo: string) => {
-      const needle = String(termo || '').toLowerCase().trim();
-      if (!needle) return { erro: 'termo vazio' };
-      const matches: any[] = [];
-      for (const ct of apiContentTypes() as any[]) {
-        const attributes = ct.attributes || {};
-        const populate = buildPopulate(attributes);
-        let entries: any[] = [];
-        try {
-          const res = await strapi
-            .documents(ct.uid)
-            .findMany({ status: 'draft', populate, limit: 200 });
-          entries = Array.isArray(res) ? res : res ? [res] : [];
-        } catch {
-          continue;
-        }
-        for (const e of entries) {
-          walkFind(e, attributes, [], needle, (path, campo, valor) => {
-            matches.push({
-              uid: ct.uid,
-              tipo: ct.info?.displayName || ct.uid,
-              documentId: e.documentId,
-              path,
-              campo,
-              valor_atual: valor.length > 300 ? valor.slice(0, 300) + '…' : valor,
-            });
-          });
-        }
-      }
-      return { total: matches.length, resultados: matches };
-    };
-
-    // Converte um nó populado de volta a uma forma gravável: preserva `id` (p/
-    // Strapi atualizar o componente no lugar em vez de recriar), mídia/relações
-    // viram id(s), e components/dynamic zones são tratados recursivamente.
-    const sanitizeNode = (node: any, attributes: Record<string, any>): any => {
-      if (node == null) return node;
-      const out: any = {};
-      if (node.id != null) out.id = node.id;
-      for (const [name, a] of Object.entries(attributes) as any[]) {
-        const v = node[name];
-        if (v === undefined) continue;
-        out[name] = sanitizeAttr(v, a);
-      }
-      return out;
-    };
-    const sanitizeAttr = (value: any, a: any): any => {
-      if (value == null) return value;
-      if (a.type === 'component' && a.component) {
-        const sub = attrsOf(a.component);
-        return a.repeatable && Array.isArray(value)
-          ? value.map((it) => sanitizeNode(it, sub))
-          : sanitizeNode(value, sub);
-      }
-      if (a.type === 'dynamiczone' && Array.isArray(value)) {
-        return value.map((it) => ({
-          __component: it.__component,
-          ...sanitizeNode(it, attrsOf(it.__component)),
-        }));
-      }
-      if (a.type === 'media') {
-        return Array.isArray(value)
-          ? value.map((m) => m?.id).filter(Boolean)
-          : value?.id ?? null;
-      }
-      if (a.type === 'relation') {
-        return Array.isArray(value)
-          ? value.map((r) => r?.id).filter(Boolean)
-          : value?.id ?? null;
-      }
-      return value;
-    };
-
-    const editarCampo = async ({
-      uid,
-      documentId,
-      path,
-      campo,
-      novo_valor,
-    }: {
-      uid: string;
-      documentId: string;
-      path?: (string | number)[];
-      campo?: string;
-      novo_valor: string;
-    }) => {
-      // Aceita `path` (array, p/ campos aninhados em components/dynamic zones)
-      // ou `campo` (string, campo simples no topo — retrocompatível).
-      const p = Array.isArray(path) && path.length ? path : campo ? [campo] : null;
-      if (!p) return { erro: 'informe "path" (array) ou "campo"' };
-      const attributes = strapi.contentTypes?.[uid]?.attributes || {};
-      const topAttr = p[0] as string;
-      const ad = attributes[topAttr];
-
-      // Campo simples no topo → update direto.
-      if (p.length === 1 && ad && TEXTUAL.includes(ad.type)) {
-        const updated = await strapi
-          .documents(uid)
-          .update({ documentId, data: { [topAttr]: novo_valor } });
-        return { ok: true, uid, documentId: updated?.documentId || documentId, path: p, novo_valor };
-      }
-
-      // Campo aninhado → busca a entrada profunda, muta no caminho, sanitiza e
-      // regrava o atributo de topo inteiro (preservando os outros componentes).
-      const populate = buildPopulate(attributes);
-      const entry = await strapi.documents(uid).findOne({ documentId, status: 'draft', populate });
-      if (!entry) return { erro: 'entrada não encontrada' };
-      let cur: any = entry;
-      for (let i = 0; i < p.length - 1; i++) {
-        if (cur == null) break;
-        cur = cur[p[i] as any];
-      }
-      if (cur == null) return { erro: `caminho inválido: ${p.join('.')}` };
-      cur[p[p.length - 1] as any] = novo_valor;
-      const data = { [topAttr]: sanitizeAttr(entry[topAttr], ad) };
-      const updated = await strapi.documents(uid).update({ documentId, data });
-      return { ok: true, uid, documentId: updated?.documentId || documentId, path: p, novo_valor };
-    };
-
-    const publicar = async ({ uid, documentId }: { uid: string; documentId: string }) => {
-      await strapi.documents(uid).publish({ documentId });
-      return { ok: true, uid, documentId, status: 'published' };
-    };
-
+    // ── Ferramentas de conteúdo (in-process; as MESMAS registradas no MCP nativo) ──
+    const { buscarTexto, editarCampo, publicar } = createContentTools(strapi);
     const LOCAL_TOOLS: Record<string, (args: any) => Promise<any>> = {
       buscar_texto: (a) => buscarTexto(a?.termo),
       editar_campo: (a) => editarCampo(a),
       publicar: (a) => publicar(a),
     };
+    const localToolSpecs = openAiToolSpecs;
 
-    const localToolSpecs = [
-      {
-        type: 'function',
-        function: {
-          name: 'buscar_texto',
-          description:
-            'Procura uma palavra/frase em TODOS os content-types, single types, COMPONENTES e DYNAMIC ZONES do Strapi (busca por substring, recursiva). Cada resultado traz uid, documentId, "path" (caminho até o campo, ex.: ["dynamic_zone",2,"heading"]), campo e valor_atual. Passe esse mesmo "path" para editar_campo.',
-          parameters: {
-            type: 'object',
-            properties: { termo: { type: 'string', description: 'trecho distintivo do texto a localizar; NÃO inclua rótulos de status que o preview adiciona, como "(Draft)" ou "(Rascunho)"' } },
-            required: ['termo'],
-          },
-        },
-      },
-      {
-        type: 'function',
-        function: {
-          name: 'editar_campo',
-          description:
-            'Altera o valor de um campo de uma entrada (salva como rascunho). Use o "path" retornado por buscar_texto para campos aninhados em componentes/dynamic zones. Para um campo simples no topo, pode usar "campo".',
-          parameters: {
-            type: 'object',
-            properties: {
-              uid: { type: 'string' },
-              documentId: { type: 'string' },
-              path: {
-                type: 'array',
-                description:
-                  'caminho até o campo, exatamente como veio de buscar_texto (ex.: ["dynamic_zone",2,"heading"]). Strings são nomes de campo; números são índices em arrays/dynamic zones.',
-                items: { type: ['string', 'number'] },
-              },
-              campo: { type: 'string', description: 'alternativa ao path, só para campo simples no topo do content-type' },
-              novo_valor: { type: 'string' },
-            },
-            required: ['uid', 'documentId', 'novo_valor'],
-          },
-        },
-      },
-      {
-        type: 'function',
-        function: {
-          name: 'publicar',
-          description: 'Publica a entrada (torna a alteração visível no site público).',
-          parameters: {
-            type: 'object',
-            properties: { uid: { type: 'string' }, documentId: { type: 'string' } },
-            required: ['uid', 'documentId'],
-          },
-        },
-      },
-    ];
-
-    // ── Ferramentas de MCP (vários servidores) ───────────────────────────────
-    // 1) Strapi MCP NATIVO (/mcp, requer STRAPI_ADMIN_TOKEN) — tools de conteúdo.
-    // 2) Playwright MCP (CONTROLE DE BROWSER) — só se PLAYWRIGHT_MCP_URL existir.
-    //    Roteamos cada tool para o client que a expôs via `mcpByTool`.
+    // ── Playwright MCP (CONTROLE DE BROWSER) — só se PLAYWRIGHT_MCP_URL existir ──
     const mcpByTool: Record<string, McpClient> = {};
     const mcpTools: any[] = [];
-
-    const mcpSources: Array<{ url?: string; name: string; token?: string }> = [
-      // URL default (/mcp nativo); token de admin exigido pelo MCP nativo.
-      { name: 'strapi', token: process.env.STRAPI_ADMIN_TOKEN },
-    ];
     if (process.env.PLAYWRIGHT_MCP_URL) {
-      mcpSources.push({ url: process.env.PLAYWRIGHT_MCP_URL, name: 'playwright' });
-    }
-
-    if (!process.env.STRAPI_ADMIN_TOKEN) {
-      strapi.log.warn(
-        '[mcp-chat] STRAPI_ADMIN_TOKEN não definido — o MCP nativo (/mcp) exige um admin token. ' +
-          'O chat seguirá com as ferramentas locais (buscar_texto/editar_campo/publicar). ' +
-          'Crie um admin token no painel e adicione STRAPI_ADMIN_TOKEN ao .env para habilitar as tools do MCP.'
-      );
-    }
-
-    for (const src of mcpSources) {
       try {
-        const client = new McpClient(src.url, src.name, src.token);
+        const client = new McpClient(process.env.PLAYWRIGHT_MCP_URL, 'playwright');
         await client.init();
         const list = await client.listTools();
         for (const t of list) {
-          // Em colisão de nome, o primeiro client a registrar vence.
           if (mcpByTool[t.name]) continue;
           mcpByTool[t.name] = client;
           mcpTools.push(t);
         }
-        strapi.log.info(`[mcp-chat] MCP "${src.name}" ok: ${list.length} tools`);
+        strapi.log.info(`[mcp-chat] MCP "playwright" ok: ${list.length} tools`);
       } catch (e: any) {
-        strapi.log.warn(
-          `[mcp-chat] MCP "${src.name}" indisponível: ${e?.message || e}`
-        );
+        strapi.log.warn(`[mcp-chat] MCP "playwright" indisponível: ${e?.message || e}`);
       }
     }
 
