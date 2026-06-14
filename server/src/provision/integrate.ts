@@ -209,6 +209,18 @@ let __locale = __defaultLocale;
 export function __setLocale(l?: string | null) { if (l && __data[l]) __locale = l; }
 export function __getLocale() { return __locale; }
 
+// Auto-inicialização no CLIENTE: define o locale a partir de ?locale/cookie no
+// momento em que o módulo carrega — ANTES de qualquer render. Garante que a
+// hidratação use o mesmo locale do SSR (evita "voltar pro inglês"), mesmo que o
+// beforeLoad do root não rode na hidratação.
+if (typeof window !== "undefined") {
+  try {
+    let __l = new URL(window.location.href).searchParams.get("locale");
+    if (!__l) { const __m = document.cookie.match(/(?:^|;\\s*)site-locale=([^;]+)/); if (__m) __l = decodeURIComponent(__m[1]); }
+    if (__l) __setLocale(__l);
+  } catch {}
+}
+
 // Exports "vivos": seguem o locale ativo sem precisar mudar os componentes.
 function __live(key: string): any {
   return new Proxy(Array.isArray(__data[__defaultLocale]?.[key]) ? [] : {}, {
