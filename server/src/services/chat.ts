@@ -15,6 +15,7 @@
 
 import { McpClient } from '../mcp-client';
 import { createContentTools, openAiToolSpecs } from '../content-tools';
+import { enableI18n } from '../enable-i18n';
 
 type ChatMessage = { role: 'user' | 'assistant'; content: string };
 type Lang = 'pt' | 'en';
@@ -45,6 +46,17 @@ Fluxo padrão quando o usuário pede uma mudança no site (por texto, voz ou mos
 4. publicar a entrada.
 5. Confirme em 1 frase o que foi alterado e publicado (content-type, campo, antes → depois).
 
+Ferramentas de tradução / idiomas (i18n):
+- listar_locales(): mostra os idiomas configurados e o default.
+- criar_locale({code}): cria um idioma (code ISO, ex.: "pt-BR"). Idempotente.
+- traduzir({target_locales, source_locale?, uid?, documentId?, publish?}): traduz o conteúdo localizado para um ou MAIS idiomas. Cria os locales se faltarem, traduz campo a campo (textos longos são divididos e remontados — não estoura) e publica. Sem uid/documentId, traduz TODAS as páginas.
+- habilitar_i18n({uid, campos?}): liga a tradução numa content-type que ainda não é localizada (a Strapi reinicia).
+
+Fluxo quando o usuário pede tradução (ex.: "traduza o site para pt-BR e espanhol"):
+1. Chame traduzir com target_locales (lista de códigos). Não precisa criar o locale antes — traduzir já cria.
+2. Se traduzir responder que a content-type não é localizada, chame habilitar_i18n nela (avise que a Strapi vai reiniciar) e peça para o usuário repetir após o restart.
+3. Confirme em 1 frase: idiomas, quantos documentos e campos foram traduzidos/publicados (use o resumo retornado, não despeje o conteúdo).
+
 Se o usuário compartilhar a tela, uma imagem é anexada à última mensagem — use-a para entender exatamente o que ele está vendo e qual texto quer trocar.
 
 Seja objetivo e acionável. Responda SEMPRE em português.`,
@@ -62,6 +74,17 @@ Default flow when the user asks for a site change (by text, voice or by showing 
 4. publicar the entry.
 5. Confirm in one sentence what was changed and published (content-type, field, before → after).
 
+Translation / language tools (i18n):
+- listar_locales(): shows configured languages and the default.
+- criar_locale({code}): creates a language (ISO code, e.g. "pt-BR"). Idempotent.
+- traduzir({target_locales, source_locale?, uid?, documentId?, publish?}): translates localized content into one or MORE languages. It creates missing locales, translates field by field (long text is split and reassembled — never overflows) and publishes. Without uid/documentId it translates ALL pages.
+- habilitar_i18n({uid, campos?}): enables translation on a content-type that isn't localized yet (Strapi restarts).
+
+Flow when the user asks for translation (e.g. "translate the site to pt-BR and Spanish"):
+1. Call traduzir with target_locales (list of codes). No need to create the locale first — traduzir creates it.
+2. If traduzir says the content-type isn't localized, call habilitar_i18n on it (warn that Strapi will restart) and ask the user to retry after the restart.
+3. Confirm in one sentence: languages, how many documents and fields were translated/published (use the returned summary, don't dump the content).
+
 If the user shares their screen, an image is attached to the last message — use it to understand exactly what they see and which text they want to change.
 
 Be concise and actionable. ALWAYS answer in English.`,
@@ -78,11 +101,16 @@ export default ({ strapi }: { strapi: any }) => ({
     const language: Lang = lang === 'en' ? 'en' : 'pt';
 
     // ── Ferramentas de conteúdo (in-process; as MESMAS registradas no MCP nativo) ──
-    const { buscarTexto, editarCampo, publicar } = createContentTools(strapi);
+    const { buscarTexto, editarCampo, publicar, listarLocales, criarLocale, traduzir } =
+      createContentTools(strapi);
     const LOCAL_TOOLS: Record<string, (args: any) => Promise<any>> = {
       buscar_texto: (a) => buscarTexto(a?.termo),
       editar_campo: (a) => editarCampo(a),
       publicar: (a) => publicar(a),
+      listar_locales: () => listarLocales(),
+      criar_locale: (a) => criarLocale(a),
+      traduzir: (a) => traduzir(a),
+      habilitar_i18n: async (a) => enableI18n({ strapi, uid: a?.uid, campos: a?.campos }),
     };
     const localToolSpecs = openAiToolSpecs;
 
@@ -192,7 +220,8 @@ export default ({ strapi }: { strapi: any }) => ({
             let r: any;
             if (local) {
               r = await local(args);
-              if (name === 'editar_campo' || name === 'publicar') didWrite = true;
+              if (['editar_campo', 'publicar', 'criar_locale', 'traduzir', 'habilitar_i18n'].includes(name))
+                didWrite = true;
               strapi.log.info(`[mcp-chat] tool ${name} -> ${JSON.stringify(r).slice(0, 200)}`);
             } else if (owner) {
               r = await owner.callTool(name, args);

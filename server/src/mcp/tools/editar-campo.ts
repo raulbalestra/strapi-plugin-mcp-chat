@@ -16,6 +16,7 @@ const tool: StrapiMcpToolModule = {
           path: z.array(z.union([z.string(), z.number()])).optional(),
           campo: z.string().optional(),
           novo_valor: z.string(),
+          locale: z.string().optional(),
         }),
       resolveOutputSchema: () =>
         z.object({
