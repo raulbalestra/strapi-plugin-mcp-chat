@@ -27,7 +27,7 @@ BUILD="$(mktemp -d)"
 trap 'rm -rf "$BUILD"' EXIT
 
 fail=0
-for t in link orchestrate i18n; do
+for t in link orchestrate i18n integrate; do
   npx esbuild "$ROOT/tests/$t.test.ts" --bundle --platform=node --format=cjs \
     --packages=external --log-level=error --outfile="$BUILD/$t.js"
   node "$BUILD/$t.js" || fail=1
