@@ -1,0 +1,13 @@
+# dependências
+node_modules
+
+# build do Next
+.next
+out
+
+# variáveis de ambiente locais (geridas pelo plugin)
+.env.local
+
+# logs e SO
+*.log
+.DS_Store

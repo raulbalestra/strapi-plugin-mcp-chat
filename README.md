@@ -15,6 +15,8 @@ https://github.com/raulbalestra/strapi-plugin-mcp-chat
 - 🎙️ **Voice** — record a request (Whisper STT) and hear replies (OpenAI TTS).
 - 👁️ **Side-by-side preview panel** — the plugin's own docked iframe that shrinks the admin and shows your frontend; reloads after each edit and **stays on the same page + scroll position** (with the optional preview bridge below). This is a custom panel, *not* Strapi's official Live Preview (which is a Growth/Enterprise feature) — it works on any plan, including Community, and complements the official Preview if you have it configured.
 - 🖥️ **Optional browser control** — if a [Playwright MCP](https://github.com/microsoft/playwright-mcp) server is reachable, the agent can drive a real browser to verify changes.
+- 🧱 **Frontend provisioning** — upload your frontend (Next.js or TanStack Start) with a `strapi.manifest.json`; the plugin validates it, creates all content-types, seeds content and wires the preview. Never runs code from the upload — it acts only on the validated manifest.
+- 🌍 **Translate every page to any language** — create locales and translate all localized content via Strapi 5's native i18n, with **no length limits and no context blowups** (see below).
 - 🌐 Bilingual UI/prompts (PT / EN).
 
 ## Requirements
@@ -188,6 +190,45 @@ in place, not recreated) and reducing media/relations to ids.
 
 > **Note:** `blocks`-type rich text is intentionally **not** edited (it's structured JSON);
 > string / text / richtext fields at any depth are.
+
+## Frontend provisioning
+
+Bring a "blessed-stack" frontend (Next.js or TanStack Start) carrying a
+`strapi.manifest.json`. The plugin **never executes code from the upload** — it
+reads and validates the manifest (Zod) and, from it, provisions the backend:
+
+```
+upload  →  validate manifest  →  extract to ../<frontend>
+        →  generate src/api/**/schema.json (additive)  →  Strapi restarts
+        →  seed content (Document Service)  →  wire .env + types + preview
+```
+
+Safety rails: schema generation runs **only in `develop`** (a Content-Type
+Builder limitation); generation is **additive** (never drops/alters an existing
+type); the frontend always lands in a **sibling folder**, never inside Strapi's
+`src/`. Ready-to-use starters live in [`starters/`](./starters). The manifest can
+also be **inferred from the frontend code** (e.g. Figma/Lovable exports).
+
+## Translation (i18n)
+
+Ask the chat to translate and it creates the locales and translates every
+localized field, using Strapi 5's **native i18n** — without the two failure modes
+of typical translation plugins:
+
+- **Long text doesn't overflow** — each value is split per paragraph (a giant
+  paragraph falls back to sentences) under a token budget, translated chunk by
+  chunk and reassembled in order, so a field of any size works.
+- **Many locales don't blow up** — each locale is an **independent, resumable
+  pass** (idempotent locale creation + per-locale upsert), so 10, 30, 50
+  languages run in sequence without accumulating context.
+
+Tools (in the chat and via the native MCP server): `criar_locale`,
+`listar_locales`, `traduzir`, `habilitar_i18n`, plus a `locale` option on
+`editar_campo`/`publicar`. In a manifest, mark `localized: true` on the
+content-type and the fields to translate; the generator emits
+`pluginOptions.i18n.localized` at both the content-type and attribute level.
+Validated end-to-end against a real Strapi 5 (14 locales, long multi-chunk text
+and translation inside repeatable components).
 
 ## Strapi 5 conventions
 

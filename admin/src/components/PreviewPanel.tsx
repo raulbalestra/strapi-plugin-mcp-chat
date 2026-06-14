@@ -23,12 +23,16 @@ type Props = {
   iframeKey: number;
   onReload: () => void;
   onClose: () => void;
+  /** mostra um overlay de carregamento sobre o iframe (ex.: subindo o dev server). */
+  loading?: boolean;
+  loadingText?: string;
+  loadingError?: boolean;
 };
 
 const MIN_W = 320;
 const clampW = (w: number) => Math.max(MIN_W, Math.min(window.innerWidth - 360, w));
 
-export const PreviewPanel = ({ open, src, displayUrl, onUrl, iframeKey, onReload, onClose }: Props) => {
+export const PreviewPanel = ({ open, src, displayUrl, onUrl, iframeKey, onReload, onClose, loading, loadingText, loadingError }: Props) => {
   const [width, setWidth] = useState(() => Math.round(window.innerWidth * 0.42));
   const [draftUrl, setDraftUrl] = useState(displayUrl);
   const [resizing, setResizing] = useState(false);
@@ -143,6 +147,41 @@ export const PreviewPanel = ({ open, src, displayUrl, onUrl, iframeKey, onReload
         />
         {/* máscara durante o resize p/ o iframe não engolir o mouse */}
         {resizing && <div style={{ position: 'absolute', inset: 0 }} />}
+
+        {/* overlay de carregamento (subindo o dev server do frontend) */}
+        {loading && (
+          <div
+            style={{
+              position: 'absolute', inset: 0, background: '#0f0f1a',
+              color: '#fff', display: 'flex', flexDirection: 'column',
+              alignItems: 'center', justifyContent: 'center', gap: 16, padding: 24,
+            }}
+          >
+            {loadingError ? (
+              <div style={{ fontSize: 40 }}>⚠️</div>
+            ) : (
+              <>
+                <div
+                  style={{
+                    width: 40, height: 40, borderRadius: '50%',
+                    border: '4px solid #3a3a55', borderTopColor: '#7b79ff',
+                    animation: 'mcpspin 0.9s linear infinite',
+                  }}
+                />
+                <style>{'@keyframes mcpspin{to{transform:rotate(360deg)}}'}</style>
+              </>
+            )}
+            <div style={{ fontSize: 14, fontWeight: 600, textAlign: 'center' }}>
+              {loadingText || 'Iniciando o frontend…'}
+            </div>
+            {!loadingError && (
+              <div style={{ fontSize: 12, color: '#9a9ab5', textAlign: 'center', maxWidth: 360 }}>
+                Instalando dependências e subindo o dev server. Na primeira vez pode
+                levar um pouco mais.
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

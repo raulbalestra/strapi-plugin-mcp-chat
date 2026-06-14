@@ -1,0 +1,50 @@
+{
+  "manifestVersion": 1,
+  "name": "loja-exemplo",
+  "framework": "tanstack",
+  "strapiVersion": "^5.47",
+  "contentTypes": [
+    {
+      "singularName": "produto",
+      "displayName": "Produto",
+      "draftAndPublish": true,
+      "attributes": {
+        "titulo": { "type": "string", "required": true },
+        "slug": { "type": "uid", "targetField": "titulo" },
+        "descricao": { "type": "richtext" },
+        "preco": { "type": "decimal", "required": true },
+        "capa": { "type": "media", "multiple": false, "allowedTypes": ["images"] },
+        "categoria": { "type": "relation", "relation": "manyToOne", "target": "categoria" }
+      },
+      "preview": { "route": "/produtos/:slug" }
+    },
+    {
+      "singularName": "categoria",
+      "displayName": "Categoria",
+      "attributes": {
+        "nome": { "type": "string", "required": true },
+        "slug": { "type": "uid", "targetField": "nome" }
+      },
+      "preview": { "route": "/categorias/:slug" }
+    }
+  ],
+  "seed": [
+    {
+      "singularName": "categoria",
+      "entries": [
+        { "nome": "Destaques", "slug": "destaques" },
+        { "nome": "Promoções", "slug": "promocoes" }
+      ]
+    },
+    {
+      "singularName": "produto",
+      "entries": [
+        { "titulo": "Colchão Box Paris", "slug": "colchao-box-paris", "preco": 1899.9, "descricao": "Conforto premium com molas ensacadas e pillow top." },
+        { "titulo": "Travesseiro Nuvem", "slug": "travesseiro-nuvem", "preco": 149.9, "descricao": "Espuma viscoelástica que se adapta ao seu pescoço." },
+        { "titulo": "Cabeceira Estofada Lyon", "slug": "cabeceira-estofada-lyon", "preco": 799.0, "descricao": "Acabamento em linho com botões capitonê." },
+        { "titulo": "Protetor de Colchão Impermeável", "slug": "protetor-colchao-impermeavel", "preco": 99.9, "descricao": "Protege contra líquidos sem alterar o conforto." }
+      ]
+    }
+  ],
+  "env": ["VITE_STRAPI_URL", "STRAPI_API_TOKEN", "PREVIEW_SECRET"]
+}

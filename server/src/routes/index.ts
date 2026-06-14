@@ -25,6 +25,42 @@ export default {
         handler: 'audio.tts',
         config: { policies: [] },
       },
+      {
+        method: 'POST',
+        path: '/frontend/analyze',
+        handler: 'frontend.analyze',
+        config: { policies: [] },
+      },
+      {
+        method: 'POST',
+        path: '/frontend/provision',
+        handler: 'frontend.provision',
+        config: { policies: [] },
+      },
+      {
+        method: 'GET',
+        path: '/frontend/status',
+        handler: 'frontend.status',
+        config: { policies: [] },
+      },
+      {
+        method: 'POST',
+        path: '/frontend/run',
+        handler: 'frontend.run',
+        config: { policies: [] },
+      },
+      {
+        method: 'GET',
+        path: '/frontend/run-status',
+        handler: 'frontend.runStatus',
+        config: { policies: [] },
+      },
+      {
+        method: 'POST',
+        path: '/frontend/integrate',
+        handler: 'frontend.integrate',
+        config: { policies: [] },
+      },
     ],
   },
 };

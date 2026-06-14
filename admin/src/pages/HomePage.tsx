@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import { Box, Flex, Typography, Button, Textarea, TextInput } from '@strapi/design-system';
 import { useFetchClient } from '@strapi/strapi/admin';
+import { Link } from 'react-router-dom';
 
 type Msg = { role: 'user' | 'assistant'; content: string; image?: string | null };
 
@@ -303,7 +304,10 @@ const HomePage = () => {
     <Box padding={6} background="neutral100" style={{ minHeight: '100vh' }}>
       <video ref={videoRef} autoPlay muted style={{ display: 'none' }} />
 
-      <Flex justifyContent="flex-end" paddingBottom={4}>
+      <Flex justifyContent="flex-end" gap={2} paddingBottom={4}>
+        <Link to="provision">
+          <Button variant="secondary">Provisionar frontend</Button>
+        </Link>
         <Button
           variant={previewOn ? 'success-light' : 'default'}
           onClick={() => setPreviewOn((v) => !v)}

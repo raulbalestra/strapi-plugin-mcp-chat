@@ -15,7 +15,7 @@
 
 import { McpClient } from '../mcp-client';
 import { createContentTools, openAiToolSpecs } from '../content-tools';
-import { enableI18n } from '../enable-i18n';
+import { enableI18n } from '../provision/enable-i18n';
 
 type ChatMessage = { role: 'user' | 'assistant'; content: string };
 type Lang = 'pt' | 'en';

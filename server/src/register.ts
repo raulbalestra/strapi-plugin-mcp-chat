@@ -6,5 +6,12 @@ import { registerMcpTools } from './mcp';
  * register → bootstrap → MCP start).
  */
 export default ({ strapi }: { strapi: any }) => {
-  registerMcpTools(strapi);
+  // Blindado: a API do MCP nativo ainda evolui entre versões da Strapi. Uma
+  // mudança de assinatura aqui NÃO pode derrubar o boot do plugin (a provisão de
+  // frontend não depende do MCP). Se falhar, só avisamos.
+  try {
+    registerMcpTools(strapi);
+  } catch (e: any) {
+    strapi.log.warn(`[mcp-chat] registro do MCP falhou (seguindo sem ele): ${e?.message ?? e}`);
+  }
 };

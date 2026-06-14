@@ -14,7 +14,8 @@ type Props = {
   previewOn: boolean;
   previewUrl: string;
   onTogglePreview: () => void;
-  onReplyReload: () => void;
+  /** chamado após uma resposta; didWrite indica que houve edição no Strapi. */
+  onReply: (didWrite: boolean) => void;
 };
 
 const W = 380;
@@ -56,7 +57,7 @@ const STR: Record<Lang, Record<string, string>> = {
   },
 };
 
-export const FloatingChat = ({ previewOn, previewUrl, onTogglePreview, onReplyReload }: Props) => {
+export const FloatingChat = ({ previewOn, previewUrl, onTogglePreview, onReply }: Props) => {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<Pos | null>(null); // null = ancorado à direita
   const [messages, setMessages] = useState<Msg[]>([]);
@@ -171,7 +172,7 @@ export const FloatingChat = ({ previewOn, previewUrl, onTogglePreview, onReplyRe
       });
       const reply = data?.reply || '(sem resposta)';
       setMessages((cur) => [...cur, { role: 'assistant', content: reply }]);
-      onReplyReload();
+      onReply(!!data?.didWrite);
       if (voiceOn) playTTS(reply);
     } catch (e: any) {
       setError(e?.response?.data?.error?.message || e?.message || t.errChat);

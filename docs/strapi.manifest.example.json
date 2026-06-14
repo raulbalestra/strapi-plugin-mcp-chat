@@ -1,0 +1,38 @@
+{
+  "manifestVersion": 1,
+  "name": "loja-exemplo",
+  "framework": "next",
+  "strapiVersion": "^5.47",
+  "contentTypes": [
+    {
+      "singularName": "produto",
+      "displayName": "Produto",
+      "draftAndPublish": true,
+      "attributes": {
+        "titulo": { "type": "string", "required": true },
+        "slug": { "type": "uid", "targetField": "titulo" },
+        "descricao": { "type": "richtext" },
+        "preco": { "type": "decimal", "required": true },
+        "capa": { "type": "media", "multiple": false, "allowedTypes": ["images"] },
+        "categoria": { "type": "relation", "relation": "manyToOne", "target": "categoria" }
+      },
+      "preview": { "route": "/produtos/:slug" }
+    },
+    {
+      "singularName": "categoria",
+      "displayName": "Categoria",
+      "attributes": {
+        "nome": { "type": "string", "required": true },
+        "slug": { "type": "uid", "targetField": "nome" }
+      },
+      "preview": { "route": "/categorias/:slug" }
+    }
+  ],
+  "seed": [
+    {
+      "singularName": "categoria",
+      "entries": [{ "nome": "Destaques", "slug": "destaques" }]
+    }
+  ],
+  "env": ["NEXT_PUBLIC_STRAPI_URL", "STRAPI_API_TOKEN", "PREVIEW_SECRET"]
+}

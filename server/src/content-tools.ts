@@ -11,7 +11,7 @@
  * edição aplica preservando os demais componentes.
  */
 
-import { translateText } from './translate';
+import { translateText } from './provision/translate';
 
 const TEXTUAL = ['string', 'text', 'richtext'];
 

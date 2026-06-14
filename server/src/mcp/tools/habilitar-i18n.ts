@@ -1,6 +1,6 @@
 import { z } from '@strapi/utils';
 import type { StrapiMcpToolModule } from '../types';
-import { enableI18n } from '../../enable-i18n';
+import { enableI18n } from '../../provision/enable-i18n';
 
 const tool: StrapiMcpToolModule = {
   register(registerTool) {

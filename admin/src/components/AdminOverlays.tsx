@@ -14,6 +14,7 @@
  * no postMessage é derivada dessa URL, então funciona para qualquer frontend.
  */
 import { useEffect, useRef, useState } from 'react';
+import { getFetchClient } from '@strapi/strapi/admin';
 import { FloatingChat } from './FloatingChat';
 import { PreviewPanel } from './PreviewPanel';
 
@@ -48,6 +49,12 @@ export const AdminOverlays = () => {
   const srcRef = useRef(initialPreviewUrl());
   const [iframeKey, setIframeKey] = useState(0);
 
+  // Auto-run do frontend provisionado ao ligar o preview pela 1ª vez.
+  const [runLoading, setRunLoading] = useState(false);
+  const [runText, setRunText] = useState('');
+  const [runError, setRunError] = useState(false);
+  const ranOnceRef = useRef(false);
+
   // Escuta a página do site reportando sua URL atual. Aceita apenas mensagens
   // vindas da origem do site atualmente carregado no preview.
   useEffect(() => {
@@ -73,6 +80,59 @@ export const AdminOverlays = () => {
     setIframeKey((k) => k + 1);
   };
 
+  // Ao LIGAR o preview: pede ao backend para rodar o frontend provisionado
+  // (instala + sobe o dev server) e mostra "carregando" até ele responder.
+  // Se não houver nada provisionado, é no-op (segue o comportamento manual).
+  useEffect(() => {
+    if (!previewOn || ranOnceRef.current) return;
+    let cancelled = false;
+    const { post, get } = getFetchClient();
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+    (async () => {
+      try {
+        ranOnceRef.current = true;
+        setRunError(false);
+        setRunText('Iniciando o frontend…');
+        let st: any;
+        try {
+          const { data } = await post('/mcp-chat/frontend/run', {});
+          st = data;
+        } catch {
+          return; // nada provisionado → modo manual
+        }
+        if (!st || (st.state === 'idle' && !st.url)) return;
+
+        setRunLoading(true);
+        const startedAt = Date.now();
+        while (!cancelled && st && st.state !== 'running' && st.state !== 'error') {
+          if (Date.now() - startedAt > 180000) { st = { state: 'error', error: 'tempo esgotado' }; break; }
+          setRunText(st.state === 'installing' ? 'Instalando dependências…' : 'Subindo o dev server…');
+          await sleep(1500);
+          try {
+            const { data } = await get('/mcp-chat/frontend/run-status');
+            st = data;
+          } catch { /* reiniciando: continua */ }
+        }
+        if (cancelled) return;
+
+        if (st.state === 'running' && st.url) {
+          navigate(st.url);
+          setRunLoading(false);
+        } else if (st.state === 'error') {
+          setRunError(true);
+          setRunText('Falha ao iniciar o frontend: ' + (st.error || 'veja o terminal'));
+        } else {
+          setRunLoading(false);
+        }
+      } catch {
+        setRunLoading(false);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [previewOn]);
+
   // Navegação manual pela barra de URL (e persiste a escolha).
   const navigate = (v: string) => {
     srcRef.current = v;
@@ -97,12 +157,34 @@ export const AdminOverlays = () => {
         iframeKey={iframeKey}
         onReload={reload}
         onClose={() => setPreviewOn(false)}
+        loading={runLoading}
+        loadingText={runText}
+        loadingError={runError}
       />
       <FloatingChat
         previewOn={previewOn}
         previewUrl={liveHref}
         onTogglePreview={() => setPreviewOn((v) => !v)}
-        onReplyReload={() => { if (previewOn) reload(); }}
+        onReply={async (didWrite) => {
+          if (!previewOn) return;
+          // Houve edição no Strapi: re-sincroniza o snapshot do frontend para o
+          // preview refletir (a fonte da verdade é o Strapi). Se não for snapshot
+          // ou não houver provisão, o integrate é no-op e só recarregamos.
+          if (didWrite) {
+            try {
+              setRunError(false);
+              setRunText('Sincronizando alterações…');
+              setRunLoading(true);
+              const { post } = getFetchClient();
+              await post('/mcp-chat/frontend/integrate', {});
+            } catch {
+              /* sem integração: segue só com reload */
+            } finally {
+              setRunLoading(false);
+            }
+          }
+          reload();
+        }}
       />
     </>
   );
