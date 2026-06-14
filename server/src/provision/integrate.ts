@@ -341,12 +341,214 @@ ${fileContent}`;
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
+// PADRÃO OFICIAL: consumo ao vivo da Content API via @strapi/client
+// ---------------------------------------------------------------------------
+
+/** Client oficial (@strapi/client). URL pública do env do framework; token é
+ *  server-only e opcional (a leitura é pública via permissions.grantPublicRead). */
+const STRAPI_CLIENT_TS = `// Gerado pelo mcp-chat — client oficial @strapi/client.
+import { strapi } from "@strapi/client";
+
+function baseUrl(): string {
+  // Vite (TanStack) expõe via import.meta.env; Next via process.env.
+  try {
+    // @ts-ignore
+    const v = import.meta?.env?.VITE_STRAPI_URL;
+    if (v) return v;
+  } catch {}
+  if (typeof process !== "undefined") {
+    const p = process.env.NEXT_PUBLIC_STRAPI_URL || process.env.STRAPI_URL;
+    if (p) return p;
+  }
+  return "http://localhost:1337";
+}
+const token = typeof process !== "undefined" ? process.env.STRAPI_API_TOKEN : undefined;
+
+const client = strapi({ baseURL: baseUrl().replace(/\\/$/, "") + "/api", ...(token ? { auth: token } : {}) });
+
+export type FetchOpts = { locale?: string; status?: "draft" | "published" };
+const params = (o: FetchOpts) => ({ populate: "*" as const, ...(o.locale ? { locale: o.locale } : {}), ...(o.status ? { status: o.status } : {}) });
+
+/** Coleção (usa o pluralName). Retorna o array de documentos (shape flat v5). */
+export async function fetchCollection(plural: string, o: FetchOpts = {}): Promise<any[]> {
+  const r = await client.collection(plural).find(params(o));
+  return (r as any).data ?? [];
+}
+/** Single type (usa o singularName). Retorna o documento. */
+export async function fetchSingle(singular: string, o: FetchOpts = {}): Promise<any> {
+  const r = await client.single(singular).find(params(o));
+  return (r as any).data ?? null;
+}
+`;
+
+/** Busca uma AMOSTRA real (1 doc por content-type) p/ a IA gerar o mapeador. */
+async function fetchSample(
+  strapi: any,
+  cts: { singularName: string; kind: string }[]
+): Promise<Record<string, any>> {
+  const sample: Record<string, any> = {};
+  for (const ct of cts) {
+    const uid = apiUid(ct.singularName);
+    try {
+      if (ct.kind === 'singleType') {
+        sample[ct.singularName] = await strapi.documents(uid).findFirst({ status: 'published', populate: '*' });
+      } else {
+        const docs = await strapi.documents(uid).findMany({ status: 'published', populate: '*', limit: 2 });
+        sample[ct.singularName] = Array.isArray(docs) ? docs : [];
+      }
+    } catch {
+      sample[ct.singularName] = ct.kind === 'singleType' ? null : [];
+    }
+  }
+  return sample;
+}
+
+/**
+ * Gera (1 chamada de IA) uma FUNÇÃO PURA `mapStrapiToData(raw)` que converte a
+ * resposta da Content API (raw, por singularName) no shape exato dos exports do
+ * arquivo de dados original (.bak). Imagens: usa a URL de mídia do Strapi quando
+ * houver; senão mantém o asset importado original (fallback). Determinística e
+ * reutilizável em runtime (não roda por locale).
+ */
+async function generateMapper(
+  apiKey: string,
+  baseSrc: string,
+  sample: Record<string, any>,
+  assetIds: string[]
+): Promise<string> {
+  const prompt = `Gere uma FUNÇÃO TypeScript pura chamada exatamente \`mapStrapiToData(raw: Record<string, any>)\` que recebe os dados da Content API do Strapi e retorna um objeto com EXATAMENTE os mesmos exports (mesmas chaves e MESMO shape) do arquivo de dados abaixo.
+
+REGRAS:
+- A função retorna um objeto cujas chaves são os nomes dos \`export const\` do arquivo (ex.: site, services, projects…), cada um no MESMO formato que o arquivo original.
+- \`raw\` tem uma chave por content-type (singularName): coleções são arrays de documentos; single types são um objeto. Documentos vêm no shape FLAT do Strapi 5 (campos no topo: documentId, e os atributos diretamente).
+- Mapeie os campos do Strapi para os campos esperados pelo arquivo (casando por nome/significado). Para listas, use \`(raw.x ?? []).map(...)\`.
+- IMAGENS: o campo pode ser objeto de mídia com \`.url\`, uma string, ou null. Use \`(doc?.campo?.url ?? doc?.campo)\` quando houver; SENÃO use o asset importado original como fallback. Assets importados disponíveis (use como variáveis): ${assetIds.join(', ') || '(nenhum)'}.
+- DEFENSIVO (OBRIGATÓRIO — o SSR não pode quebrar): use SEMPRE optional chaining \`?.\` e defaults \`??\`. NUNCA chame métodos (\`.replace\`, \`.map\`, \`.split\`, etc.) em valores que possam ser null/undefined — guarde antes: \`(x ?? "").replace(...)\`, \`(arr ?? []).map(...)\`. Todo acesso a sub-campo deve tolerar ausência.
+- Não invente conteúdo; campo ausente → default sensato (string vazia, array vazio, ou o fallback de imagem).
+- Responda APENAS com o código da função (sem imports, sem markdown, sem exports — só \`function mapStrapiToData(raw) { ... }\`).
+
+ARQUIVO DE DADOS ORIGINAL (shape alvo):
+${baseSrc.length > MAX_FILE_CHARS ? baseSrc.slice(0, MAX_FILE_CHARS) : baseSrc}
+
+AMOSTRA REAL DA RESPOSTA DO STRAPI (JSON, por singularName):
+${JSON.stringify(sample, null, 1).slice(0, 18000)}`;
+  const res = await fetch(OPENAI_URL, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: MODEL,
+      temperature: 0,
+      messages: [
+        { role: 'system', content: 'Você gera uma função pura de mapeamento Strapi→shape do frontend. Responde só com a função.' },
+        { role: 'user', content: prompt },
+      ],
+    }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  const json = (await res.json()) as any;
+  return stripFence(json.choices?.[0]?.message?.content ?? '');
+}
+
+/** Identificadores de assets importados (p/ fallback de imagem no mapeador). */
+function assetImportIds(src: string): string[] {
+  const ids: string[] = [];
+  const re = /import\s+(\w+)\s+from\s+['"][^'"]+['"]/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(src))) ids.push(m[1]);
+  return ids;
+}
+
+/**
+ * Monta o módulo de dados AO VIVO: imports de assets (fallback) + client oficial
+ * + mapeador + store + exports "vivos" (Proxy) + loadAllData/hydrate. Os
+ * componentes seguem fazendo `import { site } from "@/data/site"` sem mudança; o
+ * loader do root chama loadAllData({locale,status}) e hidrata antes do render.
+ */
+function buildLiveDataModule(
+  baseSrc: string,
+  mapperCode: string,
+  cts: { singularName: string; pluralName: string; kind: string }[],
+  locales: string[],
+  defLocale: string
+): string {
+  const imports = extractImports(baseSrc).split('\n').filter((l) => /@\/assets|\.(png|jpe?g|svg|webp|gif)/i.test(l)).join('\n');
+  const names = exportNames(baseSrc);
+  const ctMeta = JSON.stringify(cts.map((c) => ({ s: c.singularName, p: c.pluralName, k: c.kind })));
+  const liveExports = names.map((n) => `export const ${n}: any = __live(${JSON.stringify(n)});`).join('\n');
+  return `// Live data from Strapi Content API (gerado pelo mcp-chat)
+${imports}
+import { fetchCollection, fetchSingle } from "./strapi-client";
+
+const __cts = ${ctMeta};
+export const __availableLocales = ${JSON.stringify(locales)};
+export const __defaultLocale = ${JSON.stringify(defLocale)};
+/** Locale ativo a partir de ?locale/cookie (cliente) — p/ o seletor. */
+export function __getLocale(): string {
+  try {
+    if (typeof window !== "undefined") {
+      const u = new URL(window.location.href).searchParams.get("locale");
+      if (u) return u;
+      const m = document.cookie.match(/(?:^|;\\s*)site-locale=([^;]+)/);
+      if (m) return decodeURIComponent(m[1]);
+    }
+  } catch {}
+  return __defaultLocale;
+}
+
+${mapperCode}
+
+const __store: Record<string, any> = {};
+export function hydrate(d: any) { if (d) for (const k of Object.keys(d)) __store[k] = d[k]; }
+
+export async function loadAllData(opts: { locale?: string; status?: "draft" | "published" } = {}) {
+  const raw: Record<string, any> = {};
+  await Promise.all(
+    __cts.map(async (c: any) => {
+      try {
+        raw[c.s] = c.k === "singleType" ? await fetchSingle(c.s, opts) : await fetchCollection(c.p, opts);
+      } catch {
+        raw[c.s] = c.k === "singleType" ? null : [];
+      }
+    })
+  );
+  let data: any = {};
+  try { data = mapStrapiToData(raw) || {}; }
+  catch (e) { if (typeof console !== "undefined") console.error("[mcp-chat] mapStrapiToData falhou:", e); }
+  hydrate(data);
+  return data;
+}
+
+// Exports "vivos": leem o store hidratado pelo loader (sem mudar os componentes).
+function __live(key: string): any {
+  return new Proxy(function () {} as any, {
+    get(_t, p) {
+      const v = __store[key];
+      const r = v == null ? (Array.isArray(__fallback(key)) ? [] : undefined) : (v as any)[p as any];
+      return typeof r === "function" ? r.bind(v) : r;
+    },
+    has(_t, p) { const v = __store[key]; return v != null && (p in (v as any)); },
+    ownKeys() { const v = __store[key]; return v ? Reflect.ownKeys(v as any) : []; },
+    getOwnPropertyDescriptor(_t, p) {
+      const v = __store[key]; if (v == null) return undefined;
+      const d = Object.getOwnPropertyDescriptor(v as any, p);
+      if (d) (d as any).configurable = true;
+      return d;
+    },
+  });
+}
+function __fallback(_k: string): any { return []; }
+
+${liveExports}
+`;
+}
+
+// ---------------------------------------------------------------------------
 // injeção do seletor de idioma (LanguageSwitcher) + resolução isomórfica
 // ---------------------------------------------------------------------------
 
 /** Componente self-contained (sem libs externas) que troca o locale e recarrega. */
-const SWITCHER_TSX = `// Gerado pelo mcp-chat — seletor de idioma.
-import { __availableLocales, __getLocale } from "@/data/site";
+const switcherTsx = (dataImport: string) => `// Gerado pelo mcp-chat — seletor de idioma.
+import { __availableLocales, __getLocale } from "${dataImport}";
 
 const LABELS: Record<string, string> = {
   en: "EN", "pt-BR": "PT", pt: "PT", es: "ES", fr: "FR", de: "DE", it: "IT",
@@ -383,61 +585,43 @@ export function LanguageSwitcher() {
 export default LanguageSwitcher;
 `;
 
-/** Resolve o locale a partir de ?locale ou do cookie (server + client). */
-const LOCALE_INIT_TS = `// Gerado pelo mcp-chat — resolve o locale de ?locale/cookie e aplica.
-import { __setLocale } from "@/data/site";
-
-export function applyLocaleFromRequest(searchOrUrl?: any, cookieHeader?: string) {
-  let loc: string | null = null;
-  try {
-    if (searchOrUrl && typeof searchOrUrl === "object" && searchOrUrl.locale) loc = String(searchOrUrl.locale);
-  } catch {}
-  if (!loc && typeof window !== "undefined") {
-    try { loc = new URL(window.location.href).searchParams.get("locale"); } catch {}
-    if (!loc) {
-      const m = document.cookie.match(/(?:^|;\\s*)site-locale=([^;]+)/);
-      if (m) loc = decodeURIComponent(m[1]);
-    }
-  }
-  if (!loc && cookieHeader) {
-    const m = cookieHeader.match(/(?:^|;\\s*)site-locale=([^;]+)/);
-    if (m) loc = decodeURIComponent(m[1]);
-  }
-  __setLocale(loc);
-  return loc;
-}
-`;
-
-/** Injeta o switcher: cria os componentes e liga no __root + Header. */
-function injectSwitcher(frontendDir: string, warnings: string[]): void {
+/**
+ * Liga o consumo ao vivo: no __root injeta um loader que chama loadAllData (busca
+ * da Content API por locale/status e hidrata o store ANTES do render — isomórfico,
+ * sem hydration mismatch) e renderiza o <LanguageSwitcher/> no Header.
+ * `dataImport` é o specifier do módulo de dados (ex.: "@/data/site").
+ */
+function injectSwitcher(frontendDir: string, warnings: string[], dataImport = '@/data/site'): void {
   const compDir = path.join(frontendDir, 'src', 'components');
   fs.mkdirSync(compDir, { recursive: true });
-  fs.writeFileSync(path.join(compDir, 'LanguageSwitcher.tsx'), SWITCHER_TSX, 'utf8');
-  fs.writeFileSync(path.join(frontendDir, 'src', 'data', 'locale-init.ts'), LOCALE_INIT_TS, 'utf8');
+  fs.writeFileSync(path.join(compDir, 'LanguageSwitcher.tsx'), switcherTsx(dataImport), 'utf8');
 
-  // 1) __root: aplicar o locale ANTES de renderizar (isomórfico) via beforeLoad.
-  const rootCandidates = ['src/routes/__root.tsx', 'src/routes/__root.jsx'];
-  const rootRel = rootCandidates.find((r) => fs.existsSync(path.join(frontendDir, r)));
+  // 1) __root: loader isomórfico que carrega os dados (locale/status) antes do render.
+  const rootRel = ['src/routes/__root.tsx', 'src/routes/__root.jsx'].find((r) =>
+    fs.existsSync(path.join(frontendDir, r))
+  );
   if (rootRel) {
     const abs = path.join(frontendDir, rootRel);
     let src = fs.readFileSync(abs, 'utf8');
-    if (!src.includes('applyLocaleFromRequest')) {
-      src = `import { applyLocaleFromRequest } from "@/data/locale-init";\n` + src;
-      // injeta beforeLoad logo após a abertura das opções da rota raiz
+    if (!src.includes('loadAllData')) {
+      src = `import { loadAllData } from "${dataImport}";\n` + src;
       const m = src.match(/createRootRoute\w*\s*(?:<[\s\S]*?>)?\s*\([\s\S]*?\)\s*\(\s*\{/);
       if (m) {
         const at = m.index! + m[0].length;
         src =
           src.slice(0, at) +
-          `\n  validateSearch: (s: Record<string, unknown>) => ({ locale: typeof s.locale === "string" ? s.locale : undefined }),\n  beforeLoad: ({ search }: any) => { applyLocaleFromRequest(search); },` +
+          `\n  validateSearch: (s: Record<string, unknown>) => ({ locale: typeof s.locale === "string" ? s.locale : undefined }),` +
+          `\n  loaderDeps: ({ search }: any) => ({ locale: search.locale }),` +
+          `\n  loader: async ({ deps }: any) => { await loadAllData({ locale: deps?.locale }); return null; },` +
+          `\n  beforeLoad: async ({ search }: any) => { await loadAllData({ locale: search?.locale }); },` +
           src.slice(at);
       } else {
-        warnings.push('não consegui injetar beforeLoad no __root (padrão não encontrado).');
+        warnings.push('não consegui injetar o loader no __root (padrão não encontrado).');
       }
       fs.writeFileSync(abs, src, 'utf8');
     }
   } else {
-    warnings.push('__root não encontrado — switcher não ligado ao SSR.');
+    warnings.push('__root não encontrado — dados ao vivo não ligados ao SSR.');
   }
 
   // 2) Header: renderizar o <LanguageSwitcher/>.
@@ -449,8 +633,6 @@ function injectSwitcher(frontendDir: string, warnings: string[]): void {
     let src = fs.readFileSync(abs, 'utf8');
     if (!src.includes('LanguageSwitcher')) {
       src = `import { LanguageSwitcher } from "@/components/LanguageSwitcher";\n` + src;
-      // injeta antes do botão de menu mobile (presente na maioria dos headers);
-      // senão, antes do fechamento do </header>.
       if (/<button[^>]*lg:hidden/.test(src)) {
         src = src.replace(/(\s*)(<button[^>]*lg:hidden)/, `$1<LanguageSwitcher />$1$2`);
       } else {
@@ -488,51 +670,40 @@ export async function integrateFrontend(
   }
 
   const { codes, def } = await getLocales(strapi);
-  const multi = codes.length > 1;
+  const locales = codes.length ? codes : [def];
 
-  // dados do Strapi no locale default → regenera a estrutura canônica do arquivo.
-  const { data: defData, counts } = await fetchStrapiData(strapi, opts.manifest, multi ? def : undefined);
-  result.contentTypesFetched = counts;
+  // metadados das content-types (singular/plural/kind) p/ o client oficial.
+  const ctMeta = opts.manifest.contentTypes.map((ct) => ({
+    singularName: ct.singularName,
+    pluralName:
+      strapi?.contentTypes?.[apiUid(ct.singularName)]?.info?.pluralName || `${ct.singularName}s`,
+    kind: ct.kind,
+  }));
+
+  // amostra real (default) p/ a IA gerar o mapeador; também serve de contagem.
+  const sample = await fetchSample(strapi, ctMeta);
+  result.contentTypesFetched = ctMeta.map((c) => ({
+    uid: apiUid(c.singularName),
+    count: Array.isArray(sample[c.singularName]) ? sample[c.singularName].length : sample[c.singularName] ? 1 : 0,
+  }));
 
   for (const rel of dataFiles) {
     const abs = path.join(opts.frontendDir, rel);
     try {
       const original = fs.readFileSync(abs, 'utf8');
       const bak = abs + '.bak';
-      // backup do original (só na 1ª vez, para não perder o código-fonte real)
       if (!fs.existsSync(bak)) fs.writeFileSync(bak, original, 'utf8');
-      // SEMPRE regenera a partir da estrutura pristina (o .bak), pois em re-runs
-      // o arquivo atual já pode ser o módulo multi-locale gerado.
+      // estrutura-alvo SEMPRE do .bak (em re-runs o arquivo atual já é gerado).
       const baseSrc = fs.existsSync(bak) ? fs.readFileSync(bak, 'utf8') : original;
 
-      // 1) regenera o arquivo no locale default (estrutura + dados do Strapi)
-      const defFile = await regenFile(apiKey, baseSrc, rel, defData);
-      if (!defFile || defFile.length < 20) {
-        result.warnings.push(`${rel}: regeneração vazia, pulado.`);
+      // PADRÃO OFICIAL: gera o mapeador (Strapi→shape) 1x e monta o módulo que
+      // consome a Content API ao vivo (@strapi/client) por locale/status.
+      const mapper = await generateMapper(apiKey, baseSrc, sample, assetImportIds(baseSrc));
+      if (!mapper || !/mapStrapiToData/.test(mapper)) {
+        result.warnings.push(`${rel}: mapeador inválido, pulado.`);
         continue;
       }
-
-      if (!multi) {
-        fs.writeFileSync(abs, defFile, 'utf8');
-        result.filesRewritten.push(rel);
-        continue;
-      }
-
-      // 2) MULTI-LOCALE: traduz o bloco default p/ cada outro locale (prompt
-      //    pequeno = confiável, sem truncar) e combina num módulo com exports
-      //    "vivos" + seletor de idioma.
-      const perLocale: Record<string, string> = { [def]: defFile };
-      for (const loc of codes) {
-        if (loc === def) continue;
-        try {
-          const t = await translateDataFile(apiKey, defFile, LANG_NAMES[loc] || loc);
-          if (t && t.length >= 20) perLocale[loc] = t;
-          else result.warnings.push(`${rel}: tradução vazia p/ ${loc}, usando default.`);
-        } catch (e: any) {
-          result.warnings.push(`${rel}: tradução ${loc} falhou (${e?.message ?? e}).`);
-        }
-      }
-      const moduleSrc = buildMultiLocaleModule(perLocale, def);
+      const moduleSrc = buildLiveDataModule(baseSrc, mapper, ctMeta, locales, def);
       fs.writeFileSync(abs, moduleSrc, 'utf8');
       result.filesRewritten.push(rel);
     } catch (e: any) {
@@ -540,12 +711,16 @@ export async function integrateFrontend(
     }
   }
 
-  // injeta o seletor de idioma quando há >1 locale
-  if (multi && result.filesRewritten.length > 0) {
+  // client oficial + loader isomórfico (loadAllData) + seletor de idioma.
+  if (result.filesRewritten.length > 0) {
     try {
-      injectSwitcher(opts.frontendDir, result.warnings);
+      const rel0 = result.filesRewritten[0];
+      const dataDir = path.dirname(path.join(opts.frontendDir, rel0));
+      fs.writeFileSync(path.join(dataDir, 'strapi-client.ts'), STRAPI_CLIENT_TS, 'utf8');
+      const dataImport = '@/' + rel0.replace(/^src\//, '').replace(/\.(tsx?|jsx?)$/, '');
+      injectSwitcher(opts.frontendDir, result.warnings, dataImport);
     } catch (e: any) {
-      result.warnings.push(`switcher: ${e?.message ?? e}`);
+      result.warnings.push(`wiring: ${e?.message ?? e}`);
     }
   }
 
