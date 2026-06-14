@@ -87,7 +87,14 @@ export function startFrontend(_strapi: any, opts: { dir: string; url: string }):
     child.stdout?.on('data', (d) => pushLog(d));
     child.stderr?.on('data', (d) => pushLog(d));
     child.on('exit', (code) => {
-      if (info.state !== 'running') {
+      // O processo morreu → o frontend está DOWN. Zera o child e libera o
+      // estado para que apertar Preview de novo reinicie (em vez de ficar preso
+      // em "running" com um processo morto).
+      child = null;
+      if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+      if (info.state === 'running') {
+        info.state = 'idle'; // subiu e depois caiu → permite reinício limpo
+      } else {
         info.state = 'error';
         info.error = `dev encerrou (código ${code}). Veja o log.`;
       }

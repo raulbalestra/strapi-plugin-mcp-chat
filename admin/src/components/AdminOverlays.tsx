@@ -49,11 +49,10 @@ export const AdminOverlays = () => {
   const srcRef = useRef(initialPreviewUrl());
   const [iframeKey, setIframeKey] = useState(0);
 
-  // Auto-run do frontend provisionado ao ligar o preview pela 1ª vez.
+  // Auto-run do frontend provisionado SEMPRE que o preview é ligado.
   const [runLoading, setRunLoading] = useState(false);
   const [runText, setRunText] = useState('');
   const [runError, setRunError] = useState(false);
-  const ranOnceRef = useRef(false);
 
   // Escuta a página do site reportando sua URL atual. Aceita apenas mensagens
   // vindas da origem do site atualmente carregado no preview.
@@ -80,18 +79,18 @@ export const AdminOverlays = () => {
     setIframeKey((k) => k + 1);
   };
 
-  // Ao LIGAR o preview: pede ao backend para rodar o frontend provisionado
-  // (instala + sobe o dev server) e mostra "carregando" até ele responder.
-  // Se não houver nada provisionado, é no-op (segue o comportamento manual).
+  // SEMPRE que o preview é LIGADO: pede ao backend para rodar o frontend
+  // provisionado (instala + sobe o dev server) e mostra "carregando" até ele
+  // responder. O backend é idempotente: se já estiver no ar, não duplica; se
+  // tiver caído, reinicia. Se não houver nada provisionado, é no-op (modo manual).
   useEffect(() => {
-    if (!previewOn || ranOnceRef.current) return;
+    if (!previewOn) return;
     let cancelled = false;
     const { post, get } = getFetchClient();
     const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
     (async () => {
       try {
-        ranOnceRef.current = true;
         setRunError(false);
         setRunText('Iniciando o frontend…');
         let st: any;
