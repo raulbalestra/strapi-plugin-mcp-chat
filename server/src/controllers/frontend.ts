@@ -235,7 +235,7 @@ export default {
    * Roda o dev server do frontend provisionado. A UI chama isto ao ligar o
    * preview pela 1ª vez após o upload. Sem body, usa o último provisionado.
    */
-  run(ctx: any) {
+  async run(ctx: any) {
     const strapi = ctx.strapi ?? (global as any).strapi;
     if (!devOnly(ctx)) return;
 
@@ -259,7 +259,7 @@ export default {
       return ctx.badRequest('Pasta do frontend inválida.');
     }
 
-    ctx.body = startFrontend(strapi, { dir, url });
+    ctx.body = await startFrontend(strapi, { dir, url });
   },
 
   /** Status do dev server do frontend (polling da UI). */

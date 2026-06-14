@@ -1,15 +1,21 @@
 import { spawn, type ChildProcess } from 'node:child_process';
+import net from 'node:net';
 import fs from 'node:fs';
 import path from 'node:path';
 
 /**
  * Roda o dev server do frontend provisionado, a pedido da UI (quando o usuário
- * liga o preview pela 1ª vez após o upload). Detecta o gerenciador de pacotes,
- * instala se preciso e sobe `dev`, reportando o estado para a UI mostrar o
- * "carregando" até o sistema responder.
+ * liga o preview). Detecta o gerenciador de pacotes, instala se preciso e sobe
+ * `dev`, reportando o estado para a UI mostrar o "carregando" até subir.
  *
- * Só roda em dev e só dentro da pasta-pai da app (o controller valida o caminho).
- * O processo filho é morto quando a Strapi encerra.
+ * ROBUSTEZ DE PORTA/HOST (evita o 426 "Upgrade Required" e iframe em branco):
+ *  - Escolhe uma porta LIVRE em 127.0.0.1 (pula qualquer outro app que já ocupe
+ *    a porta padrão do framework — ex.: outro Vite na 5173).
+ *  - Sobe o dev server fixado em 127.0.0.1 (IPv4 explícito) com a flag de porta
+ *    do framework, e o preview usa EXATAMENTE essa URL — sem depender da
+ *    resolução ambígua de "localhost" (IPv4 vs IPv6).
+ *
+ * Só roda em dev; o controller valida o caminho. O filho morre com a Strapi.
  */
 
 export type RunState = 'idle' | 'installing' | 'starting' | 'running' | 'error';
@@ -34,6 +40,34 @@ function detectPM(dir: string): string {
   return 'npm';
 }
 
+const has = (dir: string, ...names: string[]) => names.some((n) => fs.existsSync(path.join(dir, n)));
+
+/** Detecta o framework pelo arquivo de config, p/ passar a flag de porta certa. */
+function detectFramework(dir: string): 'vite' | 'next' | 'other' {
+  if (has(dir, 'next.config.js', 'next.config.ts', 'next.config.mjs')) return 'next';
+  if (has(dir, 'vite.config.js', 'vite.config.ts', 'vite.config.mjs')) return 'vite';
+  return 'other';
+}
+
+/** Acha uma porta TCP livre em 127.0.0.1 a partir de `start` (pula ocupadas). */
+function findFreePort(start: number): Promise<number> {
+  return new Promise((resolve) => {
+    const tryPort = (p: number) => {
+      if (p > start + 200) return resolve(start); // desistência improvável
+      const srv = net.createServer();
+      srv.once('error', () => tryPort(p + 1));
+      srv.once('listening', () => srv.close(() => resolve(p)));
+      srv.listen(p, '127.0.0.1');
+    };
+    tryPort(start);
+  });
+}
+
+function portFromUrl(url: string, fallback: number): number {
+  const m = /:(\d+)/.exec(url || '');
+  return m ? parseInt(m[1], 10) : fallback;
+}
+
 function pushLog(s: string) {
   for (const line of String(s).split('\n')) {
     const t = line.trim();
@@ -45,7 +79,9 @@ function pushLog(s: string) {
 async function urlUp(url: string): Promise<boolean> {
   try {
     const res = await fetch(url, { method: 'GET' });
-    return res.status < 500;
+    // 2xx/3xx = app de verdade. 426 (Upgrade Required) e 5xx = servidor errado
+    // ou não pronto → NÃO considerar no ar.
+    return res.status >= 200 && res.status < 400;
   } catch {
     return false;
   }
@@ -64,42 +100,51 @@ export function stopFrontend(): void {
   if (info.state !== 'error') info.state = 'idle';
 }
 
-export function startFrontend(_strapi: any, opts: { dir: string; url: string }): RunInfo {
-  const { dir, url } = opts;
+export async function startFrontend(_strapi: any, opts: { dir: string; url: string }): Promise<RunInfo> {
+  const { dir } = opts;
 
   // idempotente: já rodando/subindo para o mesmo dir
   if (child && info.dir === dir && ['installing', 'starting', 'running'].includes(info.state)) {
     return getRunStatus();
   }
-  // troca de projeto: encerra o anterior
-  stopFrontend();
+  stopFrontend(); // troca de projeto / reinício limpo
 
   const pm = detectPM(dir);
+  const framework = detectFramework(dir);
+  // porta livre a partir da padrão do framework (ou da que veio na URL)
+  const basePort = portFromUrl(opts.url, framework === 'next' ? 3000 : 5173);
+  const port = await findFreePort(basePort);
+  const url = `http://127.0.0.1:${port}`;
+
   info = { state: 'installing', dir, url, pm, error: null, log: [] };
 
   const spawnIn = (cmd: string, args: string[]) =>
     spawn(cmd, args, { cwd: dir, env: { ...process.env }, stdio: ['ignore', 'pipe', 'pipe'] });
 
+  // flags p/ fixar host+porta por framework
+  const fwArgs =
+    framework === 'next'
+      ? ['-H', '127.0.0.1', '-p', String(port)]
+      : framework === 'vite'
+        ? ['--host', '127.0.0.1', '--port', String(port), '--strictPort']
+        : ['--port', String(port)];
+  // yarn repassa args direto; os demais precisam do separador "--"
+  const devArgs = pm === 'yarn' ? ['dev', ...fwArgs] : ['run', 'dev', '--', ...fwArgs];
+
   const startDev = () => {
     info.state = 'starting';
-    const devArgs = pm === 'yarn' ? ['dev'] : ['run', 'dev'];
     child = spawnIn(pm, devArgs);
     child.stdout?.on('data', (d) => pushLog(d));
     child.stderr?.on('data', (d) => pushLog(d));
     child.on('exit', (code) => {
-      // O processo morreu → o frontend está DOWN. Zera o child e libera o
-      // estado para que apertar Preview de novo reinicie (em vez de ficar preso
-      // em "running" com um processo morto).
+      // processo morreu → frontend DOWN. Zera o child e libera o estado p/ que
+      // apertar Preview de novo reinicie (em vez de ficar preso em "running").
       child = null;
       if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
-      if (info.state === 'running') {
-        info.state = 'idle'; // subiu e depois caiu → permite reinício limpo
-      } else {
-        info.state = 'error';
-        info.error = `dev encerrou (código ${code}). Veja o log.`;
-      }
+      if (info.state === 'running') info.state = 'idle';
+      else { info.state = 'error'; info.error = `dev encerrou (código ${code}). Veja o log.`; }
     });
-    // confirma que subiu fazendo polling no próprio URL
+    // confirma que subiu fazendo polling no próprio URL (127.0.0.1:porta)
     pollTimer = setInterval(async () => {
       if (await urlUp(url)) {
         info.state = 'running';
