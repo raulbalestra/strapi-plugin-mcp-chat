@@ -8,14 +8,16 @@ const tool: StrapiMcpToolModule = {
       name: 'mcp_chat_habilitar_i18n',
       title: 'Enable i18n on a content-type',
       description:
-        'Enable translation on an existing content-type that is not localized yet: marks the content-type and its textual fields as localized. Required before translating content provisioned without i18n. Edits the schema (dev-only); Strapi restarts.',
+        'Enable translation on content-types not localized yet: marks the content-type and its textual fields/components as localized. Required before translating content provisioned without i18n. Omit `uid` (or pass "*") to enable ALL content-types at once. Edits the schema (dev-only); Strapi restarts.',
       resolveInputSchema: () =>
-        z.object({ uid: z.string(), campos: z.array(z.string()).optional() }),
+        z.object({ uid: z.string().optional(), campos: z.array(z.string()).optional() }),
       resolveOutputSchema: () =>
         z.object({
           ok: z.boolean().optional(),
           uid: z.string().optional(),
           campos: z.array(z.string()).optional(),
+          contentTypes: z.array(z.any()).optional(),
+          total: z.number().optional(),
           restart: z.boolean().optional(),
           erro: z.string().optional(),
         }),

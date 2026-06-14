@@ -50,12 +50,13 @@ Ferramentas de tradução / idiomas (i18n):
 - listar_locales(): mostra os idiomas configurados e o default.
 - criar_locale({code}): cria um idioma (code ISO, ex.: "pt-BR"). Idempotente.
 - traduzir({target_locales, source_locale?, uid?, documentId?, publish?}): traduz o conteúdo localizado para um ou MAIS idiomas. Cria os locales se faltarem, traduz campo a campo (textos longos são divididos e remontados — não estoura) e publica. Sem uid/documentId, traduz TODAS as páginas.
-- habilitar_i18n({uid, campos?}): liga a tradução numa content-type que ainda não é localizada (a Strapi reinicia).
+- habilitar_i18n({uid?, campos?}): liga a tradução em content-types ainda não localizadas (a Strapi reinicia). OMITA uid para habilitar em TODAS de uma vez. NUNCA adivinhe uids — para o site inteiro, sempre sem uid.
 
-Fluxo quando o usuário pede tradução (ex.: "traduza o site para pt-BR e espanhol"):
+Fluxo quando o usuário pede tradução (ex.: "quero o site todo em pt-BR"):
 1. Chame traduzir com target_locales (lista de códigos). Não precisa criar o locale antes — traduzir já cria.
-2. Se traduzir responder que a content-type não é localizada, chame habilitar_i18n nela (avise que a Strapi vai reiniciar) e peça para o usuário repetir após o restart.
-3. Confirme em 1 frase: idiomas, quantos documentos e campos foram traduzidos/publicados (use o resumo retornado, não despeje o conteúdo).
+2. Se traduzir disser que NENHUMA content-type é localizada (i18n desligado), chame habilitar_i18n SEM uid (habilita todas de uma vez), avise que a Strapi vai reiniciar e que é só repetir o pedido após o restart. NÃO chame habilitar_i18n uid por uid nem invente nomes.
+3. Após o restart, ao repetir, traduzir funciona e localiza tudo.
+4. Confirme em 1 frase: idiomas, quantos documentos e campos foram traduzidos/publicados (use o resumo retornado, não despeje o conteúdo).
 
 Se o usuário compartilhar a tela, uma imagem é anexada à última mensagem — use-a para entender exatamente o que ele está vendo e qual texto quer trocar.
 
@@ -78,12 +79,13 @@ Translation / language tools (i18n):
 - listar_locales(): shows configured languages and the default.
 - criar_locale({code}): creates a language (ISO code, e.g. "pt-BR"). Idempotent.
 - traduzir({target_locales, source_locale?, uid?, documentId?, publish?}): translates localized content into one or MORE languages. It creates missing locales, translates field by field (long text is split and reassembled — never overflows) and publishes. Without uid/documentId it translates ALL pages.
-- habilitar_i18n({uid, campos?}): enables translation on a content-type that isn't localized yet (Strapi restarts).
+- habilitar_i18n({uid?, campos?}): enables translation on content-types not localized yet (Strapi restarts). OMIT uid to enable ALL at once. NEVER guess uids — for the whole site, always call it without uid.
 
-Flow when the user asks for translation (e.g. "translate the site to pt-BR and Spanish"):
+Flow when the user asks for translation (e.g. "I want the whole site in pt-BR"):
 1. Call traduzir with target_locales (list of codes). No need to create the locale first — traduzir creates it.
-2. If traduzir says the content-type isn't localized, call habilitar_i18n on it (warn that Strapi will restart) and ask the user to retry after the restart.
-3. Confirm in one sentence: languages, how many documents and fields were translated/published (use the returned summary, don't dump the content).
+2. If traduzir says NO content-type is localized (i18n off), call habilitar_i18n WITHOUT uid (enables all at once), warn that Strapi will restart and that they just need to repeat the request after the restart. Do NOT call habilitar_i18n per-uid or invent names.
+3. After the restart, repeating the request makes traduzir localize everything.
+4. Confirm in one sentence: languages, how many documents and fields were translated/published (use the returned summary, don't dump the content).
 
 If the user shares their screen, an image is attached to the last message — use it to understand exactly what they see and which text they want to change.
 

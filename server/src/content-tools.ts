@@ -503,18 +503,17 @@ export const openAiToolSpecs = [
     function: {
       name: 'habilitar_i18n',
       description:
-        'Habilita i18n (tradução) numa content-type JÁ existente que ainda não é localizada: marca a CT e seus campos textuais como localizados. Necessário antes de traduzir conteúdo provisionado sem i18n. Edita o schema e a Strapi reinicia (em desenvolvimento).',
+        'Habilita i18n (tradução) em content-types que ainda não são localizadas: marca a CT e seus campos textuais/componentes como localizados. Necessário antes de traduzir conteúdo provisionado sem i18n. OMITA "uid" (ou passe "*") para habilitar em TODAS as content-types de uma vez (recomendado para "traduzir o site inteiro") — um único restart. Edita o schema e a Strapi reinicia (em desenvolvimento). NÃO adivinhe uids.',
       parameters: {
         type: 'object',
         properties: {
-          uid: { type: 'string', description: 'ex.: api::home.home' },
+          uid: { type: 'string', description: 'opcional; ex.: api::home-content.home-content. Omita p/ TODAS.' },
           campos: {
             type: 'array',
             items: { type: 'string' },
-            description: 'opcional; campos a localizar (default = todos os textuais)',
+            description: 'opcional; campos a localizar (default = todos os textuais/componentes)',
           },
         },
-        required: ['uid'],
       },
     },
   },
