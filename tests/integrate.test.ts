@@ -2,13 +2,14 @@ import {
   exportNames,
   findExportValues,
   extractImports,
-  buildMultiLocaleModule,
+  assetImportIds,
+  buildLiveDataModule,
 } from '../server/src/provision/integrate';
 
 /**
- * Testa as partes DETERMINÍSTICAS do snapshot multi-locale (sem LLM/Strapi):
- * extração de exports balanceada, preservação de imports e montagem do módulo
- * com exports "vivos" + seletor de idioma.
+ * Testa as partes DETERMINÍSTICAS do consumo AO VIVO (sem LLM/Strapi):
+ * extração de exports/imports, ids de assets e montagem do módulo ao vivo
+ * (client + store + exports "vivos" + loadAllData).
  */
 
 let pass = 0;
@@ -54,22 +55,27 @@ for (const n of names) {
   ok(open === close, `balanceado: ${n}`);
 }
 
-// extractImports
+// extractImports + assetImportIds
 const imp = extractImports(FILE);
 ok(imp.includes('hero') && imp.includes('tile') && !imp.includes('export'), 'imports extraídos (sem exports)');
+const aids = assetImportIds(FILE);
+ok(aids.includes('hero') && aids.includes('tile'), 'assetImportIds acha os assets p/ fallback');
 
-// buildMultiLocaleModule
-const pt = FILE.replace('Quality Work. Reliable Service.', 'Trabalho de Qualidade.').replace(
-  'Bathroom Remodeling',
-  'Reforma de Banheiro'
-);
-const mod = buildMultiLocaleModule({ en: FILE, 'pt-BR': pt }, 'en');
-ok(mod.includes('__availableLocales = ["en","pt-BR"]'), 'módulo lista os locales');
-ok(mod.includes('export const site: any = __live("site")'), 'export site vivo');
-ok(mod.includes('export const services: any = __live("services")'), 'export services vivo');
-ok(mod.includes('Trabalho de Qualidade') && mod.includes('Reforma de Banheiro'), 'texto pt-BR no __data');
-ok(mod.includes('function __live') && mod.includes('export function __setLocale'), 'tem proxy + setLocale');
-ok(mod.includes('import hero from "@/assets/hero.png"'), 'imports de assets preservados no módulo');
+// buildLiveDataModule (módulo AO VIVO oficial)
+const mapper = 'function mapStrapiToData(raw) { return { site: raw.site ?? {}, services: raw.service ?? [], empty: [] }; }';
+const cts = [
+  { singularName: 'site', pluralName: 'sites', kind: 'singleType' },
+  { singularName: 'service', pluralName: 'services', kind: 'collectionType' },
+];
+const mod = buildLiveDataModule(FILE, mapper, cts, ['en', 'pt-BR'], 'en');
+ok(mod.includes('from "./strapi-client"'), 'importa o client oficial');
+ok(mod.includes('export async function loadAllData'), 'expõe loadAllData (loader)');
+ok(mod.includes('mapStrapiToData'), 'inclui o mapeador');
+ok(mod.includes('export const site: any = __live("site")') && mod.includes('export const services: any = __live("services")'), 'exports vivos (proxy)');
+ok(mod.includes('__availableLocales = ["en","pt-BR"]') && mod.includes('export function __getLocale'), 'expõe locales + __getLocale p/ o seletor');
+ok(mod.includes('fetchSingle(c.s, opts)') && mod.includes('fetchCollection(c.p, opts)'), 'loadAllData usa single/collection por kind');
+ok(mod.includes('"p":"services"') && mod.includes('"s":"site"'), '__cts traz singular/plural corretos');
+ok(mod.includes('import hero from "@/assets/hero.png"'), 'imports de assets preservados (fallback de imagem)');
 
 console.log(`\nintegrate.test: ${pass} passaram, ${fail} falharam`);
 if (fail > 0) process.exit(1);

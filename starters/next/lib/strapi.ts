@@ -1,71 +1,53 @@
-import type {
-  Produto,
-  StrapiCollectionResponse,
-} from "@/strapi-types";
+import { strapi } from "@strapi/client";
+import type { Produto } from "@/strapi-types";
+
+/**
+ * Acesso à Content API do Strapi 5 pelo client OFICIAL `@strapi/client`.
+ *
+ * - `NEXT_PUBLIC_STRAPI_URL` é pública (cliente + servidor).
+ * - `STRAPI_API_TOKEN` é server-only e OPCIONAL (a leitura é pública via
+ *   permissões concedidas no provisionamento).
+ * - Suporta `locale` (i18n) e `draft` (Draft & Publish → status).
+ */
 
 const STRAPI_URL = process.env.NEXT_PUBLIC_STRAPI_URL ?? "http://localhost:1337";
 const API_TOKEN = process.env.STRAPI_API_TOKEN;
 
-interface FetchOptions {
-  /** Quando true, busca conteúdo em rascunho (Draft Mode). */
+const client = strapi({
+  baseURL: `${STRAPI_URL.replace(/\/$/, "")}/api`,
+  ...(API_TOKEN ? { auth: API_TOKEN } : {}),
+});
+
+export interface QueryOptions {
+  /** Draft Mode → status=draft; senão status=published. */
   draft?: boolean;
+  /** Locale i18n (ex.: "pt-BR"). Omitido = locale default. */
+  locale?: string;
 }
 
-/**
- * Helper central de fetch para a API REST do Strapi.
- *
- * - Monta a URL a partir de NEXT_PUBLIC_STRAPI_URL.
- * - Adiciona `Authorization: Bearer <token>` se STRAPI_API_TOKEN existir.
- * - Acrescenta `status=draft` ou `status=published` conforme o Draft Mode.
- */
-export async function strapiFetch<T>(
-  path: string,
-  { draft = false }: FetchOptions = {},
-): Promise<T> {
-  const url = new URL(path.replace(/^\//, ""), `${STRAPI_URL}/`);
-  url.searchParams.set("status", draft ? "draft" : "published");
+const baseParams = ({ draft, locale }: QueryOptions) => ({
+  populate: "*" as const,
+  status: (draft ? "draft" : "published") as "draft" | "published",
+  ...(locale ? { locale } : {}),
+});
 
-  const headers: HeadersInit = { "Content-Type": "application/json" };
-  if (API_TOKEN) {
-    headers.Authorization = `Bearer ${API_TOKEN}`;
-  }
-
-  const res = await fetch(url.toString(), {
-    headers,
-    // Em Draft Mode não cacheamos; em produção (publicado) deixamos o Next decidir.
-    cache: draft ? "no-store" : "no-store",
-  });
-
-  if (!res.ok) {
-    throw new Error(
-      `Strapi respondeu ${res.status} ${res.statusText} para ${url.pathname}`,
-    );
-  }
-
-  return (await res.json()) as T;
-}
-
-/** Lista todos os produtos (com relações e mídia populadas). */
-export async function getProdutos(draft = false): Promise<Produto[]> {
-  const json = await strapiFetch<StrapiCollectionResponse<Produto>>(
-    "/api/produtos?populate=*",
-    { draft },
-  );
-  return json.data ?? [];
+/** Lista todos os produtos (relações/mídia populadas), por locale/status. */
+export async function getProdutos(draft = false, locale?: string): Promise<Produto[]> {
+  const r = await client.collection("produtos").find(baseParams({ draft, locale }));
+  return ((r as any).data ?? []) as Produto[];
 }
 
 /** Busca um produto pelo slug. Retorna null se não existir. */
 export async function getProdutoBySlug(
   slug: string,
   draft = false,
+  locale?: string,
 ): Promise<Produto | null> {
-  const query = `/api/produtos?filters[slug][$eq]=${encodeURIComponent(
-    slug,
-  )}&populate=*`;
-  const json = await strapiFetch<StrapiCollectionResponse<Produto>>(query, {
-    draft,
+  const r = await client.collection("produtos").find({
+    ...baseParams({ draft, locale }),
+    filters: { slug: { $eq: slug } },
   });
-  return json.data?.[0] ?? null;
+  return (((r as any).data ?? [])[0] ?? null) as Produto | null;
 }
 
 /** Resolve a URL absoluta de uma mídia do Strapi (que pode vir relativa). */

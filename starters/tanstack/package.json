@@ -11,7 +11,8 @@
     "@tanstack/react-router": "^1.95.0",
     "@tanstack/react-start": "^1.95.0",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "@strapi/client": "^1.6.2"
   },
   "devDependencies": {
     "@tanstack/react-router-devtools": "^1.95.0",

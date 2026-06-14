@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { spawn } from 'node:child_process';
 import type { Manifest } from './manifest';
 import { apiUid } from './generate';
 
@@ -381,6 +382,43 @@ export async function fetchSingle(singular: string, o: FetchOpts = {}): Promise<
 }
 `;
 
+/** Garante que `@strapi/client` está instalado no frontend (o módulo ao vivo o
+ *  importa). Adiciona à package.json e instala se faltar. Best-effort. */
+async function ensureClientDep(frontendDir: string, warnings: string[]): Promise<void> {
+  if (fs.existsSync(path.join(frontendDir, 'node_modules', '@strapi', 'client'))) return;
+  // declara na package.json
+  try {
+    const pkgPath = path.join(frontendDir, 'package.json');
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+    pkg.dependencies = pkg.dependencies || {};
+    if (!pkg.dependencies['@strapi/client']) {
+      pkg.dependencies['@strapi/client'] = '^1.6.2';
+      fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n', 'utf8');
+    }
+  } catch (e: any) {
+    warnings.push(`package.json do frontend: ${e?.message ?? e}`);
+  }
+  // detecta o PM e instala só o @strapi/client
+  const pm = fs.existsSync(path.join(frontendDir, 'bun.lock')) || fs.existsSync(path.join(frontendDir, 'bun.lockb'))
+    ? 'bun'
+    : fs.existsSync(path.join(frontendDir, 'pnpm-lock.yaml'))
+      ? 'pnpm'
+      : fs.existsSync(path.join(frontendDir, 'yarn.lock'))
+        ? 'yarn'
+        : 'npm';
+  const args = pm === 'npm' ? ['install', '@strapi/client', '--no-audit', '--no-fund'] : ['add', '@strapi/client'];
+  await new Promise<void>((resolve) => {
+    try {
+      const c = spawn(pm, args, { cwd: frontendDir, stdio: 'ignore' });
+      c.on('exit', () => resolve());
+      c.on('error', () => { warnings.push(`não consegui instalar @strapi/client (${pm}); instale manualmente.`); resolve(); });
+    } catch {
+      warnings.push('falha ao instalar @strapi/client; instale manualmente.');
+      resolve();
+    }
+  });
+}
+
 /** Busca uma AMOSTRA real (1 doc por content-type) p/ a IA gerar o mapeador. */
 async function fetchSample(
   strapi: any,
@@ -450,7 +488,7 @@ ${JSON.stringify(sample, null, 1).slice(0, 18000)}`;
 }
 
 /** Identificadores de assets importados (p/ fallback de imagem no mapeador). */
-function assetImportIds(src: string): string[] {
+export function assetImportIds(src: string): string[] {
   const ids: string[] = [];
   const re = /import\s+(\w+)\s+from\s+['"][^'"]+['"]/g;
   let m: RegExpExecArray | null;
@@ -464,7 +502,7 @@ function assetImportIds(src: string): string[] {
  * componentes seguem fazendo `import { site } from "@/data/site"` sem mudança; o
  * loader do root chama loadAllData({locale,status}) e hidrata antes do render.
  */
-function buildLiveDataModule(
+export function buildLiveDataModule(
   baseSrc: string,
   mapperCode: string,
   cts: { singularName: string; pluralName: string; kind: string }[],
@@ -719,6 +757,7 @@ export async function integrateFrontend(
       fs.writeFileSync(path.join(dataDir, 'strapi-client.ts'), STRAPI_CLIENT_TS, 'utf8');
       const dataImport = '@/' + rel0.replace(/^src\//, '').replace(/\.(tsx?|jsx?)$/, '');
       injectSwitcher(opts.frontendDir, result.warnings, dataImport);
+      await ensureClientDep(opts.frontendDir, result.warnings);
     } catch (e: any) {
       result.warnings.push(`wiring: ${e?.message ?? e}`);
     }
