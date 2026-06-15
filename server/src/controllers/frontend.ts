@@ -190,7 +190,13 @@ export default {
     }
 
     const port = strapi.config.get('server.port', 1337);
-    const context: LinkContext = { strapiUrl: `http://localhost:${port}` };
+    let locales: string[] = [];
+    try {
+      locales = ((await strapi.plugin('i18n').service('locales').find()) || []).map((l: any) => l.code);
+    } catch {
+      /* i18n off — segue sem locales */
+    }
+    const context: LinkContext = { strapiUrl: `http://localhost:${port}`, locales };
 
     const staged = stageProvision(strapi, {
       rawManifest: v.data,

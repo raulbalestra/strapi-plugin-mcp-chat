@@ -7,12 +7,14 @@ export const dynamic = "force-dynamic";
 
 interface PageProps {
   params: Promise<{ slug: string }>;
+  searchParams: Promise<{ locale?: string }>;
 }
 
-export default async function ProdutoPage({ params }: PageProps) {
+export default async function ProdutoPage({ params, searchParams }: PageProps) {
   const { slug } = await params;
+  const { locale } = await searchParams;
   const { isEnabled } = await draftMode();
-  const produto = await getProdutoBySlug(slug, isEnabled);
+  const produto = await getProdutoBySlug(slug, isEnabled, locale);
 
   if (!produto) {
     notFound();

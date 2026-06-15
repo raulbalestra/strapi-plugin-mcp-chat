@@ -3,9 +3,13 @@ import { getProdutoBySlug } from '~/lib/strapi'
 import { isPreview } from '~/lib/preview'
 
 export const Route = createFileRoute('/produtos/$slug')({
-  loader: async ({ params }) => {
+  validateSearch: (s: Record<string, unknown>) => ({
+    locale: typeof s.locale === 'string' ? s.locale : undefined,
+  }),
+  loaderDeps: ({ search }) => ({ locale: search.locale }),
+  loader: async ({ params, deps }) => {
     const draft = await isPreview()
-    const produto = await getProdutoBySlug(params.slug, draft)
+    const produto = await getProdutoBySlug(params.slug, draft, deps.locale)
     return { produto, draft }
   },
   component: ProdutoPage,

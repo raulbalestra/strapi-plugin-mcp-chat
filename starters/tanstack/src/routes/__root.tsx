@@ -7,6 +7,7 @@ import {
 } from '@tanstack/react-router'
 import type { ReactNode } from 'react'
 import { PreviewBridge } from '~/components/PreviewBridge'
+import { LanguageSwitcher } from '~/components/LanguageSwitcher'
 import appCss from '~/styles.css?url'
 
 export const Route = createRootRoute({
@@ -42,6 +43,7 @@ function RootDocument({ children }: { children: ReactNode }) {
           <Link to="/" className="logo">
             Loja Exemplo
           </Link>
+          <LanguageSwitcher />
         </header>
         <main className="container">{children}</main>
         <Scripts />

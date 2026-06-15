@@ -4,9 +4,14 @@ import { getProdutos, mediaUrl } from "@/lib/strapi";
 
 export const dynamic = "force-dynamic";
 
-export default async function HomePage() {
+export default async function HomePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ locale?: string }>;
+}) {
   const { isEnabled } = await draftMode();
-  const produtos = await getProdutos(isEnabled);
+  const { locale } = await searchParams;
+  const produtos = await getProdutos(isEnabled, locale);
 
   return (
     <main className="container">

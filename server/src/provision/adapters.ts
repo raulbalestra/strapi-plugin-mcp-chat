@@ -21,6 +21,8 @@ export interface LinkContext {
   apiToken?: string;
   /** segredo do preview (draft mode). */
   previewSecret?: string;
+  /** locales i18n disponíveis (p/ o seletor de idioma do frontend). */
+  locales?: string[];
 }
 
 export interface FrameworkAdapter {
@@ -39,11 +41,13 @@ const nextAdapter: FrameworkAdapter = {
   framework: 'next',
   envFileName: '.env.local',
   defaultPort: 3000,
-  buildEnv: ({ strapiUrl, apiToken, previewSecret }) => {
+  buildEnv: ({ strapiUrl, apiToken, previewSecret, locales }) => {
     const env: Record<string, string> = {
       // pública: usada por Server e Client Components
       NEXT_PUBLIC_STRAPI_URL: strapiUrl,
     };
+    // pública: lista de idiomas p/ o seletor (CSV)
+    if (locales && locales.length) env.NEXT_PUBLIC_LOCALES = locales.join(',');
     // server-only (sem NEXT_PUBLIC_): nunca vai pro bundle do client
     if (apiToken) env.STRAPI_API_TOKEN = apiToken;
     if (previewSecret) env.PREVIEW_SECRET = previewSecret;
@@ -57,11 +61,13 @@ const tanstackAdapter: FrameworkAdapter = {
   framework: 'tanstack',
   envFileName: '.env',
   defaultPort: 5173,
-  buildEnv: ({ strapiUrl, apiToken, previewSecret }) => {
+  buildEnv: ({ strapiUrl, apiToken, previewSecret, locales }) => {
     const env: Record<string, string> = {
       // pública no Vite/TanStack: exposta via import.meta.env
       VITE_STRAPI_URL: strapiUrl,
     };
+    // pública: lista de idiomas p/ o seletor (CSV)
+    if (locales && locales.length) env.VITE_LOCALES = locales.join(',');
     // server-only (sem VITE_): só acessível em loaders/server functions
     if (apiToken) env.STRAPI_API_TOKEN = apiToken;
     if (previewSecret) env.PREVIEW_SECRET = previewSecret;

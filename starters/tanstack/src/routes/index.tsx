@@ -3,10 +3,14 @@ import { getProdutos } from '~/lib/strapi'
 import { isPreview } from '~/lib/preview'
 
 export const Route = createFileRoute('/')({
-  loader: async () => {
+  validateSearch: (s: Record<string, unknown>) => ({
+    locale: typeof s.locale === 'string' ? s.locale : undefined,
+  }),
+  loaderDeps: ({ search }) => ({ locale: search.locale }),
+  loader: async ({ deps }) => {
     // Em modo preview (cookie presente) buscamos rascunhos; senão, publicados.
     const draft = await isPreview()
-    const produtos = await getProdutos(draft)
+    const produtos = await getProdutos(draft, deps.locale)
     return { produtos, draft }
   },
   component: HomePage,
