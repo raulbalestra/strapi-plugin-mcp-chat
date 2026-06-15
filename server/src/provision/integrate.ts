@@ -808,6 +808,26 @@ async function syntaxOk(code: string): Promise<boolean> {
   return depthC === 0 && depthB === 0 && depthP === 0 && /export\s/.test(code);
 }
 
+/** Consolida QUALQUER import de `<base>/...` (ex.: @/data/site, @/data/homeContent)
+ *  num único `import { ...todos... } from "<dataImport>"`. Corrige a IA quando ela
+ *  trata o nome do export como caminho de módulo (import inválido). */
+function normalizeDataImports(code: string, dataImport: string): string {
+  const base = dataImport.replace(/\/[^/]+$/, ''); // ex.: @/data
+  const esc = base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(`import\\s*\\{([^}]*)\\}\\s*from\\s*["']${esc}/[^"']*["'];?[ \\t]*\\n?`, 'g');
+  const specs = new Set<string>();
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(code))) {
+    for (const s of m[1].split(',')) {
+      const t = s.trim();
+      if (t) specs.add(t);
+    }
+  }
+  if (!specs.size) return code;
+  const out = code.replace(re, '');
+  return `import { ${[...specs].join(', ')} } from "${dataImport}";\n` + out;
+}
+
 /** Religa todos os componentes que contêm textos do CMS. */
 async function rewireComponents(
   strapi: any,
@@ -832,8 +852,9 @@ async function rewireComponents(
     for (const [v, expr] of Object.entries(map)) if (src.includes(v)) subset[v] = expr;
     if (!Object.keys(subset).length) continue; // nada do CMS aqui
     try {
-      const out = await generateRewire(opts.apiKey, src, subset, opts.dataImport);
+      let out = await generateRewire(opts.apiKey, src, subset, opts.dataImport);
       if (!out || out.length < 30) { warnings.push(`${rel}: rewire vazio, pulado.`); continue; }
+      out = normalizeDataImports(out, opts.dataImport); // corrige imports de dados
       if (!(await syntaxOk(out))) { warnings.push(`${rel}: rewire com erro de sintaxe, mantido original.`); continue; }
       const bak = abs + '.bak';
       if (!fs.existsSync(bak)) fs.writeFileSync(bak, src, 'utf8');
