@@ -463,6 +463,8 @@ REGRAS:
 - IMAGENS: o campo pode ser objeto de mídia com \`.url\`, uma string, ou null. Use \`(doc?.campo?.url ?? doc?.campo)\` quando houver; SENÃO use o asset importado original como fallback. Assets importados disponíveis (use como variáveis): ${assetIds.join(', ') || '(nenhum)'}.
 - DEFENSIVO (OBRIGATÓRIO — o SSR não pode quebrar): use SEMPRE optional chaining \`?.\` e defaults \`??\`. NUNCA chame métodos (\`.replace\`, \`.map\`, \`.split\`, etc.) em valores que possam ser null/undefined — guarde antes: \`(x ?? "").replace(...)\`, \`(arr ?? []).map(...)\`. Todo acesso a sub-campo deve tolerar ausência.
 - Não invente conteúdo; campo ausente → default sensato (string vazia, array vazio, ou o fallback de imagem).
+- ISOLAMENTO POR EXPORT (OBRIGATÓRIO): construa o resultado com CADA export no seu próprio try/catch, para que uma falha num export NÃO derrube os outros. Padrão EXATO:
+  \`function mapStrapiToData(raw) { const out = {}; try { out.site = (/* ... */); } catch { out.site = {}; } try { out.services = (raw.service ?? []).map((s) => (/* ... */)); } catch { out.services = []; } /* ...um try/catch por export... */ return out; }\`
 - Responda APENAS com o código da função (sem imports, sem markdown, sem exports — só \`function mapStrapiToData(raw) { ... }\`).
 
 ARQUIVO DE DADOS ORIGINAL (shape alvo):
