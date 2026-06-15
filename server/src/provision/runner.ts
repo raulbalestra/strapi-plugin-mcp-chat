@@ -49,7 +49,16 @@ function detectFramework(dir: string): 'vite' | 'next' | 'other' {
   return 'other';
 }
 
-/** Acha uma porta TCP livre em 127.0.0.1 a partir de `start` (pula ocupadas). */
+/**
+ * Porta-base do dev server do FRONTEND no preview. Propositalmente longe de:
+ *  - 5173 (Vite do PAINEL ADMIN do próprio Strapi 5 em `strapi develop`),
+ *  - 3000 (Next default) e 1337 (Strapi).
+ * Evita colisão com o admin do Strapi (que responde 426 a requests não-WS).
+ */
+const FRONTEND_BASE_PORT = 4321;
+
+/** Acha uma porta TCP livre a partir de `start`, testando em 0.0.0.0 (pega
+ *  ocupações em `*:porta` de qualquer interface IPv4). */
 function findFreePort(start: number): Promise<number> {
   return new Promise((resolve) => {
     const tryPort = (p: number) => {
@@ -57,15 +66,10 @@ function findFreePort(start: number): Promise<number> {
       const srv = net.createServer();
       srv.once('error', () => tryPort(p + 1));
       srv.once('listening', () => srv.close(() => resolve(p)));
-      srv.listen(p, '127.0.0.1');
+      srv.listen(p, '0.0.0.0');
     };
     tryPort(start);
   });
-}
-
-function portFromUrl(url: string, fallback: number): number {
-  const m = /:(\d+)/.exec(url || '');
-  return m ? parseInt(m[1], 10) : fallback;
 }
 
 function pushLog(s: string) {
@@ -111,9 +115,9 @@ export async function startFrontend(_strapi: any, opts: { dir: string; url: stri
 
   const pm = detectPM(dir);
   const framework = detectFramework(dir);
-  // porta livre a partir da padrão do framework (ou da que veio na URL)
-  const basePort = portFromUrl(opts.url, framework === 'next' ? 3000 : 5173);
-  const port = await findFreePort(basePort);
+  // porta livre numa faixa dedicada (longe de 5173/3000/1337) — evita colidir
+  // com o Vite do admin do Strapi e outros servidores.
+  const port = await findFreePort(FRONTEND_BASE_PORT);
   const url = `http://127.0.0.1:${port}`;
 
   info = { state: 'installing', dir, url, pm, error: null, log: [] };
