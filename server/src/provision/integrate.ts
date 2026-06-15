@@ -250,8 +250,13 @@ ${liveExports}
 // ---------------------------------------------------------------------------
 
 function stripFence(s: string): string {
-  const m = s.match(/```(?:ts|tsx|typescript|js|jsx)?\s*([\s\S]*?)```/);
-  return (m ? m[1] : s).trim();
+  // remove cerca de markdown com QUALQUER tag de linguagem (ts/tsx/js/jsx/
+  // javascript/typescript…) — senão o nome da linguagem vaza pro início do código.
+  const m = s.match(/```[a-zA-Z]*[ \t]*\r?\n([\s\S]*?)```/);
+  let out = (m ? m[1] : s).trim();
+  // defesa extra: linha 1 sendo só a tag de linguagem.
+  out = out.replace(/^\s*(?:javascript|typescript|tsx?|jsx?)\s*\n/i, '');
+  return out.trim();
 }
 
 async function regenFile(
@@ -514,12 +519,31 @@ export function buildLiveDataModule(
   const imports = extractImports(baseSrc).split('\n').filter((l) => /@\/assets|\.(png|jpe?g|svg|webp|gif)/i.test(l)).join('\n');
   const names = exportNames(baseSrc);
   const ctMeta = JSON.stringify(cts.map((c) => ({ s: c.singularName, p: c.pluralName, k: c.kind })));
-  const liveExports = names.map((n) => `export const ${n}: any = __live(${JSON.stringify(n)});`).join('\n');
+  // single types (ex.: home-content) viram exports camelCase (homeContent) com o
+  // documento bruto traduzido — usados pelos componentes religados ao CMS.
+  const camel = (s: string) => s.replace(/-+([a-zA-Z0-9])/g, (_m, c) => c.toUpperCase());
+  const singleMap: Record<string, string> = {};
+  // single types viram exports camelCase, EXCETO os que colidem com um export já
+  // existente no data file (ex.: o single type `site` vs o export `site`) — esses
+  // o mapeador já trata.
+  for (const c of cts) {
+    if (c.kind !== 'singleType') continue;
+    const e = camel(c.singularName);
+    if (names.includes(e)) continue;
+    singleMap[c.singularName] = e;
+  }
+  const pageExports = Object.values(singleMap)
+    .map((e) => `export const ${e}: any = __live(${JSON.stringify(e)});`)
+    .join('\n');
+  const liveExports =
+    names.map((n) => `export const ${n}: any = __live(${JSON.stringify(n)});`).join('\n') +
+    (pageExports ? '\n' + pageExports : '');
   return `// Live data from Strapi Content API (gerado pelo mcp-chat)
 ${imports}
 import { fetchCollection, fetchSingle } from "./strapi-client";
 
 const __cts = ${ctMeta};
+const __single: Record<string, string> = ${JSON.stringify(singleMap)};
 export const __availableLocales = ${JSON.stringify(locales)};
 export const __defaultLocale = ${JSON.stringify(defLocale)};
 /** Locale ativo a partir de ?locale/cookie (cliente) — p/ o seletor. */
@@ -555,6 +579,8 @@ export async function loadAllData(opts: { locale?: string; status?: "draft" | "p
   try { data = mapStrapiToData(raw) || {}; }
   catch (e) { if (typeof console !== "undefined") console.error("[mcp-chat] mapStrapiToData falhou:", e); }
   hydrate(data);
+  // expõe o conteúdo de página (single types) bruto/traduzido p/ os componentes.
+  for (const s of Object.keys(__single)) __store[__single[s]] = raw[s] || {};
   return data;
 }
 
@@ -652,8 +678,7 @@ function injectSwitcher(frontendDir: string, warnings: string[], dataImport = '@
           src.slice(0, at) +
           `\n  validateSearch: (s: Record<string, unknown>) => ({ locale: typeof s.locale === "string" ? s.locale : undefined }),` +
           `\n  loaderDeps: ({ search }: any) => ({ locale: search.locale }),` +
-          `\n  loader: async ({ deps }: any) => { await loadAllData({ locale: deps?.locale }); return null; },` +
-          `\n  beforeLoad: async ({ search }: any) => { await loadAllData({ locale: search?.locale }); },` +
+          `\n  loader: async ({ deps }: any) => { const data = await loadAllData({ locale: deps?.locale }); return { data }; },` +
           src.slice(at);
       } else {
         warnings.push('não consegui injetar o loader no __root (padrão não encontrado).');
@@ -683,6 +708,142 @@ function injectSwitcher(frontendDir: string, warnings: string[], dataImport = '@
   } else {
     warnings.push('Header não encontrado — adicione <LanguageSwitcher/> manualmente.');
   }
+}
+
+// ---------------------------------------------------------------------------
+// religar componentes ao CMS (texto hardcoded → conteúdo do Strapi por locale)
+// ---------------------------------------------------------------------------
+
+const SYS_FIELDS = new Set(['id', 'documentId', 'createdAt', 'updatedAt', 'publishedAt', 'locale', 'slug', 'url']);
+
+/** Mapa: valor-de-texto-EN → expressão JS (lê do export de conteúdo + fallback). */
+function buildValueMap(
+  sample: Record<string, any>,
+  cts: { singularName: string; kind: string }[]
+): Record<string, string> {
+  const camel = (s: string) => s.replace(/-+([a-zA-Z0-9])/g, (_m, c) => c.toUpperCase());
+  const map: Record<string, string> = {};
+  for (const ct of cts) {
+    if (ct.kind !== 'singleType') continue;
+    const doc = sample[ct.singularName];
+    if (!doc || typeof doc !== 'object') continue;
+    const exp = camel(ct.singularName);
+    for (const [field, val] of Object.entries(doc)) {
+      if (SYS_FIELDS.has(field)) continue;
+      if (typeof val !== 'string') continue;
+      const v = val.trim();
+      if (v.length < 4) continue; // muito curto/ambíguo
+      if (/^https?:\/\//.test(v)) continue; // URLs
+      if (map[v]) continue; // 1ª ocorrência vence
+      map[v] = `${exp}?.${field} ?? ${JSON.stringify(v)}`;
+    }
+  }
+  return map;
+}
+
+/** Religa UM componente: a IA troca os textos hardcoded pelas expressões do CMS. */
+async function generateRewire(
+  apiKey: string,
+  src: string,
+  subset: Record<string, string>,
+  dataImport: string
+): Promise<string> {
+  const pairs = Object.entries(subset)
+    .map(([v, expr]) => `- ${JSON.stringify(v)}  →  {${expr}}`)
+    .join('\n');
+  const prompt = `Religue este componente React/JSX ao CMS, trocando textos hardcoded por expressões que leem do Strapi (já localizadas).
+
+MAPA (texto exato no arquivo → expressão a usar):
+${pairs}
+
+REGRAS ESTRITAS:
+- Para CADA ocorrência EXATA de um texto do mapa, substitua pela expressão, no formato correto do contexto:
+  • nó de texto JSX:  Texto  →  {EXPR}
+  • atributo string:  attr="Texto"  →  attr={EXPR}
+  • string JS usada como conteúdo:  "Texto"  →  (EXPR)
+- A EXPR já tem fallback (?? "texto original"); use-a como veio (entre {} no JSX).
+- Adicione os imports necessários no topo: importe os símbolos usados (ex.: ${dataImport.includes('~') ? '~' : '@'}/data/site). Os exports de conteúdo são camelCase (ex.: homeContent).
+- NÃO altere mais NADA: estrutura, classes, lógica, imports existentes, nada fora do mapa.
+- Responda APENAS com o arquivo final (sem markdown).
+
+ARQUIVO:
+${src.length > MAX_FILE_CHARS ? src.slice(0, MAX_FILE_CHARS) : src}`;
+  const res = await fetch(OPENAI_URL, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: MODEL,
+      temperature: 0,
+      messages: [
+        { role: 'system', content: 'Você religa componentes ao CMS trocando só os textos do mapa por expressões. Responde só com o código.' },
+        { role: 'user', content: prompt },
+      ],
+    }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  const json = (await res.json()) as any;
+  return stripFence(json.choices?.[0]?.message?.content ?? '');
+}
+
+/** Checa sintaxe de um .tsx/.ts. Usa esbuild se disponível; senão cai num
+ *  heurístico de balanceamento (delimitadores + presença de export/JSX). */
+async function syntaxOk(code: string): Promise<boolean> {
+  let esbuild: any;
+  try { esbuild = require('esbuild'); } catch { esbuild = null; }
+  if (esbuild?.transform) {
+    try { await esbuild.transform(code, { loader: 'tsx' }); return true; }
+    catch { return false; }
+  }
+  // fallback: balanceamento de () {} [] fora de strings/comentários
+  let depthC = 0, depthB = 0, depthP = 0, inStr: string | null = null, esc = false;
+  for (let i = 0; i < code.length; i++) {
+    const c = code[i];
+    if (inStr) { if (esc) esc = false; else if (c === '\\') esc = true; else if (c === inStr) inStr = null; continue; }
+    if (c === '"' || c === "'" || c === '`') inStr = c;
+    else if (c === '{') depthC++; else if (c === '}') depthC--;
+    else if (c === '[') depthB++; else if (c === ']') depthB--;
+    else if (c === '(') depthP++; else if (c === ')') depthP--;
+    if (depthC < 0 || depthB < 0 || depthP < 0) return false;
+  }
+  return depthC === 0 && depthB === 0 && depthP === 0 && /export\s/.test(code);
+}
+
+/** Religa todos os componentes que contêm textos do CMS. */
+async function rewireComponents(
+  strapi: any,
+  opts: { frontendDir: string; sample: Record<string, any>; cts: any[]; apiKey: string; dataImport: string },
+  warnings: string[]
+): Promise<string[]> {
+  const map = buildValueMap(opts.sample, opts.cts);
+  if (!Object.keys(map).length) return [];
+  const rewired: string[] = [];
+  const files: string[] = [];
+  walk(opts.frontendDir, opts.frontendDir, files);
+  const targets = files.filter(
+    (rel) =>
+      /\.(tsx|jsx)$/.test(rel) &&
+      !/__root|routeTree\.gen|\/api\/|LanguageSwitcher|PreviewBridge|\/ui\//.test(rel)
+  );
+  for (const rel of targets) {
+    const abs = path.join(opts.frontendDir, rel);
+    let src: string;
+    try { src = fs.readFileSync(abs, 'utf8'); } catch { continue; }
+    const subset: Record<string, string> = {};
+    for (const [v, expr] of Object.entries(map)) if (src.includes(v)) subset[v] = expr;
+    if (!Object.keys(subset).length) continue; // nada do CMS aqui
+    try {
+      const out = await generateRewire(opts.apiKey, src, subset, opts.dataImport);
+      if (!out || out.length < 30) { warnings.push(`${rel}: rewire vazio, pulado.`); continue; }
+      if (!(await syntaxOk(out))) { warnings.push(`${rel}: rewire com erro de sintaxe, mantido original.`); continue; }
+      const bak = abs + '.bak';
+      if (!fs.existsSync(bak)) fs.writeFileSync(bak, src, 'utf8');
+      fs.writeFileSync(abs, out, 'utf8');
+      rewired.push(rel);
+    } catch (e: any) {
+      warnings.push(`${rel}: rewire falhou (${e?.message ?? e}).`);
+    }
+  }
+  return rewired;
 }
 
 export async function integrateFrontend(
@@ -760,6 +921,17 @@ export async function integrateFrontend(
       const dataImport = '@/' + rel0.replace(/^src\//, '').replace(/\.(tsx?|jsx?)$/, '');
       injectSwitcher(opts.frontendDir, result.warnings, dataImport);
       await ensureClientDep(opts.frontendDir, result.warnings);
+      // religa os componentes ao CMS (texto hardcoded → conteúdo do Strapi por locale)
+      try {
+        const rewired = await rewireComponents(
+          strapi,
+          { frontendDir: opts.frontendDir, sample, cts: ctMeta, apiKey, dataImport },
+          result.warnings
+        );
+        if (rewired.length) result.filesRewritten.push(...rewired);
+      } catch (e: any) {
+        result.warnings.push(`rewire: ${e?.message ?? e}`);
+      }
     } catch (e: any) {
       result.warnings.push(`wiring: ${e?.message ?? e}`);
     }
