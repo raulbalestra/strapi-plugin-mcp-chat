@@ -22,6 +22,16 @@ export const registerMcpTools = (strapi: any) => {
     );
     return;
   }
-  for (const tool of tools) mcp.registerTool(tool);
-  strapi.log.info(`[mcp-chat] ${tools.length} tools registradas no MCP nativo (mcp_chat_*).`);
+  let registered = 0;
+  for (const tool of tools) {
+    // Isola cada tool: uma definição com problema NUNCA aborta o registro das
+    // demais nem o boot do Strapi.
+    try {
+      mcp.registerTool(tool);
+      registered += 1;
+    } catch (e: any) {
+      strapi.log.warn(`[mcp-chat] tool "${tool?.name}" falhou ao registrar: ${e?.message ?? e}`);
+    }
+  }
+  strapi.log.info(`[mcp-chat] ${registered}/${tools.length} tools registradas no MCP nativo (mcp_chat_*).`);
 };

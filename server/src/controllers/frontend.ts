@@ -26,8 +26,13 @@ import type { LinkContext } from '../provision/adapters';
 const MANIFEST_NAME = 'strapi.manifest.json';
 
 function ensureInside(base: string, target: string): boolean {
-  const n = path.normalize(target);
-  return n === base || n.startsWith(base + path.sep);
+  // Resolve ambos para absoluto e compara via path.relative — robusto contra
+  // "..", separadores mistos e zip-slip (entrada do zip não pode escapar da pasta).
+  const b = path.resolve(base);
+  const t = path.resolve(target);
+  if (t === b) return true;
+  const rel = path.relative(b, t);
+  return !!rel && !rel.startsWith('..') && !path.isAbsolute(rel);
 }
 
 /** normaliza um nome livre para o formato kebab exigido pelo manifest. */

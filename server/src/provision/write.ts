@@ -49,6 +49,58 @@ function isDev(): boolean {
   return process.env.NODE_ENV === 'development';
 }
 
+// Tipos de atributo que a Strapi 5 aceita num schema.json. Um type fora desta
+// lista faz a Strapi recusar o boot — então validamos ANTES de escrever.
+const KNOWN_ATTR_TYPES = new Set([
+  'string', 'text', 'richtext', 'blocks', 'email', 'password', 'uid', 'enumeration',
+  'json', 'integer', 'biginteger', 'decimal', 'float', 'date', 'time', 'datetime',
+  'timestamp', 'boolean', 'media', 'relation', 'component', 'dynamiczone',
+]);
+
+/**
+ * Valida o conteúdo de um schema.json gerado contra o formato que a Strapi 5
+ * exige. Retorna a lista de erros (vazia = ok). É a trava que garante que uma
+ * provisão NUNCA escreva um schema que impeça o Strapi de bootar.
+ */
+function validateApi(api: GeneratedApi): string[] {
+  const errs: string[] = [];
+  const rel = Object.keys(api.files).find((r) => r.endsWith('schema.json'));
+  if (!rel) {
+    errs.push(`${api.singularName}: schema.json ausente nos arquivos gerados`);
+    return errs;
+  }
+  let schema: any;
+  try {
+    schema = JSON.parse(api.files[rel]);
+  } catch (e: any) {
+    errs.push(`${api.singularName}: schema.json não é JSON válido (${e?.message ?? e})`);
+    return errs;
+  }
+  if (schema?.kind !== 'collectionType' && schema?.kind !== 'singleType') {
+    errs.push(`${api.singularName}: "kind" inválido (${schema?.kind})`);
+  }
+  if (!schema?.info?.singularName || !schema?.info?.pluralName) {
+    errs.push(`${api.singularName}: info.singularName/pluralName obrigatórios`);
+  }
+  const attrs = schema?.attributes;
+  if (!attrs || typeof attrs !== 'object') {
+    errs.push(`${api.singularName}: "attributes" ausente ou inválido`);
+  } else {
+    for (const [name, a] of Object.entries(attrs) as any[]) {
+      if (!a || typeof a !== 'object' || !a.type) {
+        errs.push(`${api.singularName}.${name}: atributo sem "type"`);
+      } else if (!KNOWN_ATTR_TYPES.has(a.type)) {
+        errs.push(`${api.singularName}.${name}: type desconhecido "${a.type}"`);
+      } else if (a.type === 'relation' && !a.target) {
+        errs.push(`${api.singularName}.${name}: relation sem "target"`);
+      } else if (a.type === 'component' && !a.component) {
+        errs.push(`${api.singularName}.${name}: component sem "component"`);
+      }
+    }
+  }
+  return errs;
+}
+
 /**
  * Escreve as content-types geradas em src/api. Aditivo e idempotente: o que já
  * existe é preservado e reportado em `skipped`.
@@ -77,6 +129,46 @@ export function writeApis(
 
   if (!path.isAbsolute(opts.apiRoot)) {
     result.errors.push(`apiRoot deve ser um caminho absoluto: ${opts.apiRoot}`);
+    return result;
+  }
+
+  // ── Validação ALL-OR-NOTHING (antes de tocar no disco) ──────────────────────
+  // Só serão escritas as apis que ainda não existem (trava aditiva). Validamos
+  // TODAS elas; se UMA for inválida, não escrevemos NENHUMA — assim uma provisão
+  // jamais pode deixar o Strapi com um schema quebrado e sem bootar.
+  const toWrite = apis.filter((api) => !fs.existsSync(path.join(opts.apiRoot, api.singularName)));
+  const knownSingulars = new Set<string>([
+    ...apis.map((a) => a.singularName),
+    ...(fs.existsSync(opts.apiRoot)
+      ? fs.readdirSync(opts.apiRoot, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name)
+      : []),
+  ]);
+  const validationErrors: string[] = [];
+  for (const api of toWrite) {
+    validationErrors.push(...validateApi(api));
+    // relações: o target (api::<s>.<s>) precisa existir (gerado agora ou já no disco)
+    const rel = Object.keys(api.files).find((r) => r.endsWith('schema.json'));
+    if (rel) {
+      try {
+        const attrs = JSON.parse(api.files[rel])?.attributes || {};
+        for (const [name, a] of Object.entries(attrs) as any[]) {
+          if (a?.type === 'relation' && typeof a.target === 'string') {
+            const tgt = a.target.split('::')[1]?.split('.')[0];
+            if (tgt && !knownSingulars.has(tgt)) {
+              validationErrors.push(`${api.singularName}.${name}: relation aponta para "${a.target}" inexistente`);
+            }
+          }
+        }
+      } catch {
+        /* já reportado por validateApi */
+      }
+    }
+  }
+  if (validationErrors.length) {
+    result.errors.push(
+      'Schema gerado inválido — nada foi escrito (provisão abortada com segurança):',
+      ...validationErrors
+    );
     return result;
   }
 

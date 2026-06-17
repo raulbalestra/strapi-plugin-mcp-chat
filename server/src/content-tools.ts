@@ -45,20 +45,24 @@ export function createContentTools(strapi: any) {
 
   // Populate profundo: components (simples/repetíveis), dynamic zones (com `on`
   // por componente) e mídia/relações. `seen` evita recursão infinita.
-  const buildPopulate = (attributes: Record<string, any>, seen = new Set<string>()): any => {
+  // `seen` evita ciclos (componente que se referencia) e `depth` é um teto rígido
+  // contra schemas patológicos (recursão profunda → stack/memória).
+  const MAX_DEPTH = 8;
+  const buildPopulate = (attributes: Record<string, any>, seen = new Set<string>(), depth = 0): any => {
+    if (depth >= MAX_DEPTH) return {};
     const populate: any = {};
     for (const [name, a] of Object.entries(attributes) as any[]) {
       if (a.type === 'component' && a.component) {
         const sub = seen.has(a.component)
           ? {}
-          : buildPopulate(attrsOf(a.component), new Set(seen).add(a.component));
+          : buildPopulate(attrsOf(a.component), new Set(seen).add(a.component), depth + 1);
         populate[name] = Object.keys(sub).length ? { populate: sub } : true;
       } else if (a.type === 'dynamiczone') {
         const on: any = {};
         for (const comp of a.components || []) {
           const sub = seen.has(comp)
             ? {}
-            : buildPopulate(attrsOf(comp), new Set(seen).add(comp));
+            : buildPopulate(attrsOf(comp), new Set(seen).add(comp), depth + 1);
           on[comp] = Object.keys(sub).length ? { populate: sub } : true;
         }
         populate[name] = { on };
@@ -77,6 +81,7 @@ export function createContentTools(strapi: any) {
     collect: (path: (string | number)[], campo: string, valor: string) => void
   ) => {
     if (!node || typeof node !== 'object') return;
+    if (basePath.length > 24) return; // teto rígido contra recursão patológica
     for (const [name, a] of Object.entries(attributes) as any[]) {
       const v = node[name];
       if (v == null) continue;
@@ -102,11 +107,13 @@ export function createContentTools(strapi: any) {
     }
   };
 
+  const MAX_MATCHES = 100;
   const buscarTexto = async (termo: string) => {
     const needle = String(termo || '').toLowerCase().trim();
     if (!needle) return { erro: 'termo vazio' };
     const matches: any[] = [];
     for (const ct of apiContentTypes() as any[]) {
+      if (matches.length >= MAX_MATCHES) break; // teto: não varre além do necessário
       const attributes = ct.attributes || {};
       const populate = buildPopulate(attributes);
       let entries: any[] = [];
@@ -135,7 +142,12 @@ export function createContentTools(strapi: any) {
         });
       }
     }
-    return { total: matches.length, resultados: matches };
+    const truncated = matches.length > MAX_MATCHES;
+    return {
+      total: matches.length,
+      resultados: matches.slice(0, MAX_MATCHES),
+      ...(truncated ? { truncado: true, nota: `mostrando ${MAX_MATCHES} de ${matches.length} resultados; refine o termo` } : {}),
+    };
   };
 
   // Converte um nó populado de volta a forma gravável: preserva `id` (p/ Strapi

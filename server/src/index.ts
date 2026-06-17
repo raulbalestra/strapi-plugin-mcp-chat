@@ -31,7 +31,12 @@ export default {
   },
   destroy() {
     // encerra o dev server do frontend (se foi iniciado pelo preview).
-    stopFrontend();
+    // Nunca deixa o shutdown do Strapi falhar por causa disto.
+    try {
+      stopFrontend();
+    } catch {
+      /* shutdown best-effort */
+    }
   },
   config: {
     default: {},

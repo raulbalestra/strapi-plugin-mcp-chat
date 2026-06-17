@@ -132,7 +132,11 @@ export default ({ strapi }: { strapi: any }) => ({
     if (process.env.PLAYWRIGHT_MCP_URL) {
       try {
         const client = new McpClient(process.env.PLAYWRIGHT_MCP_URL, 'playwright');
-        await client.init();
+        // init com timeout: um Playwright MCP fora do ar não pode travar o chat.
+        await Promise.race([
+          client.init(),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 4000)),
+        ]);
         const list = await client.listTools();
         for (const t of list) {
           if (mcpByTool[t.name]) continue;
@@ -207,11 +211,23 @@ export default ({ strapi }: { strapi: any }) => ({
     });
 
     const callOpenAI = async (body: any) => {
-      const res = await fetch(OPENAI_URL, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
+      // Timeout: uma chamada lenta da OpenAI não pode prender a request do admin.
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 60000);
+      let res: Response;
+      try {
+        res = await fetch(OPENAI_URL, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+          signal: ctrl.signal,
+        });
+      } catch (e: any) {
+        if (e?.name === 'AbortError') throw new Error('OpenAI chat: tempo limite excedido (60s).');
+        throw e;
+      } finally {
+        clearTimeout(timer);
+      }
       if (!res.ok) throw new Error(`OpenAI chat: ${await res.text()}`);
       return res.json() as Promise<any>;
     };
@@ -253,6 +269,12 @@ export default ({ strapi }: { strapi: any }) => ({
             content = typeof r === 'string' ? r : JSON.stringify(r);
           } catch (e: any) {
             content = `Erro ao chamar a tool ${name}: ${e?.message || e}`;
+          }
+          // Cap defensivo: um resultado gigante não pode estourar o contexto do
+          // modelo nem inflar memória/latência.
+          const MAX_TOOL_CHARS = 12000;
+          if (content.length > MAX_TOOL_CHARS) {
+            content = content.slice(0, MAX_TOOL_CHARS) + `\n…[resultado truncado: ${content.length} chars]`;
           }
           convo.push({ role: 'tool', tool_call_id: call.id, content });
         }

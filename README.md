@@ -321,6 +321,27 @@ single spot.
   token's permissions — scope the token to only what those clients should change.
 - The agent can edit and publish content — give the plugin only to trusted editors.
 
+## Reliability — never degrades or breaks the host Strapi
+
+This plugin is built to be a good citizen: installing it must never slow down or take
+down the host app. Concrete guarantees:
+
+- **Can't crash boot.** `register()` degrades gracefully if the native MCP server / i18n /
+  OpenAI key are absent (logs a warning, disables the feature). MCP tools register inside a
+  per-tool `try/catch`, so a single bad tool can never abort the others or the boot.
+  `destroy()` is best-effort.
+- **Can't blank the admin.** The global overlay (floating chat + preview) mounts inside a
+  React **error boundary** in its own root, after an SSR/double-mount guard; any render
+  error just hides the overlay, leaving the Strapi admin fully intact. Lingering preview
+  layout styles are reset on load, and screen/mic capture is stopped on unmount.
+- **Provisioning is fail-safe.** Generated schemas are **validated before any file is
+  written** (kind/attributes/known types/relation targets) and writes are **all-or-nothing**
+  — a malformed manifest can never leave Strapi with a broken, unbootable schema. Generation
+  stays additive (never touches existing types), dev-only, with hardened zip-slip protection.
+- **Won't become a bottleneck.** Every outbound call (OpenAI, MCP) has a **timeout** so a
+  slow upstream can't hold a request open; recursive content search has depth caps and a
+  result cap; tool outputs are size-capped before going back to the model.
+
 ## License
 
 [MIT](./LICENSE) © Raul Balestra

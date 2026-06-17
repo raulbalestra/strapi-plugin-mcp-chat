@@ -14,6 +14,18 @@ const baseHeaders = {
   Accept: 'application/json, text/event-stream',
 };
 
+/** fetch com timeout (AbortController) — nenhum endpoint MCP pode pendurar uma
+ *  request do Strapi indefinidamente. */
+const fetchT = async (url: string, opts: any, timeoutMs = 8000): Promise<Response> => {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...opts, signal: ctrl.signal });
+  } finally {
+    clearTimeout(t);
+  }
+};
+
 const parseSse = (text: string): any => {
   const dataLines = text
     .split('\n')
@@ -50,7 +62,7 @@ export class McpClient {
   }
 
   async init(): Promise<void> {
-    const res = await fetch(this.url, {
+    const res = await fetchT(this.url, {
       method: 'POST',
       headers: this.headers(),
       body: JSON.stringify({
@@ -67,7 +79,7 @@ export class McpClient {
     this.sessionId = res.headers.get('mcp-session-id') || undefined;
     await res.text();
     // Notifica que o handshake terminou (sem corpo de resposta relevante).
-    await fetch(this.url, {
+    await fetchT(this.url, {
       method: 'POST',
       headers: this.headers(),
       body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }),
@@ -75,7 +87,7 @@ export class McpClient {
   }
 
   private async rpc(method: string, params: any, id: number): Promise<any> {
-    const res = await fetch(this.url, {
+    const res = await fetchT(this.url, {
       method: 'POST',
       headers: this.headers(),
       body: JSON.stringify({ jsonrpc: '2.0', id, method, params }),

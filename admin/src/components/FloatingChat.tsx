@@ -113,6 +113,14 @@ export const FloatingChat = ({ previewOn, previewUrl, onTogglePreview, onReply }
     if (bodyRef.current) bodyRef.current.scrollTop = bodyRef.current.scrollHeight;
   }, [messages, loading]);
 
+  // ── Cleanup ao desmontar: encerra captura de tela / microfone (sem vazar) ──
+  useEffect(() => {
+    return () => {
+      try { streamRef.current?.getTracks().forEach((t) => t.stop()); } catch { /* noop */ }
+      try { recorderRef.current?.stop(); } catch { /* noop */ }
+    };
+  }, []);
+
   // ── Screenshare ───────────────────────────────────────────────────────────
   const startShare = async () => {
     setError(null);
