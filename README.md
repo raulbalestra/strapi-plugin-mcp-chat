@@ -24,7 +24,8 @@ https://github.com/raulbalestra/strapi-plugin-mcp-chat
 - 🖥️ **Optional browser control** — if a [Playwright MCP](https://github.com/microsoft/playwright-mcp) server is reachable, the agent can drive a real browser to verify changes.
 - 🧱 **Frontend provisioning** — upload your frontend (Next.js or TanStack Start) with a `strapi.manifest.json`; the plugin validates it, creates all content-types, seeds content and wires the preview. Never runs code from the upload — it acts only on the validated manifest.
 - 🌍 **Translate every page to any language** — create locales and translate all localized content via Strapi 5's native i18n, with **no length limits and no context blowups** (see below).
-- 🌐 Bilingual UI/prompts (PT / EN).
+- 🌐 **Fully bilingual (PT / EN)** — both the AI prompts/voice *and* the plugin's own admin pages, switchable with one click (the choice is shared across the chat and the menu pages).
+- 🎓 **Built-in onboarding tour** — a first-run mini-course (re-openable any time via **❓ Tour**) walks new users through chat, editing, live preview, provisioning and translation.
 
 ## Why MCP Chat vs. other AI/MCP plugins
 

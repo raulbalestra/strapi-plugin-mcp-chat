@@ -2,6 +2,9 @@ import { useRef, useState, useEffect } from 'react';
 import { Box, Flex, Typography, Button, Loader, Textarea } from '@strapi/design-system';
 import { useFetchClient } from '@strapi/strapi/admin';
 import { Link } from 'react-router-dom';
+import { useLang, makeT } from '../i18n';
+import { LangSwitcher } from '../components/LangSwitcher';
+import { StackLogos } from '../components/StackLogos';
 
 /**
  * Provisão de frontend em duas etapas (cenário Figma/Lovable, sem manifest):
@@ -41,6 +44,8 @@ const POLL_TIMEOUT_MS = 120000;
 const ProvisionPage = () => {
   const { post, get } = useFetchClient();
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const [lang] = useLang();
+  const t = makeT(lang);
 
   const [file, setFile] = useState<File | null>(null);
   const [phase, setPhase] = useState<Phase>('idle');
@@ -96,11 +101,11 @@ const ProvisionPage = () => {
       setFilesAnalyzed(res.filesAnalyzed || []);
       setManifestText(res.manifest ? JSON.stringify(res.manifest, null, 2) : '');
       if (!res.ok && res.errors?.length) {
-        setError(`Aviso da análise:\n• ${res.errors.join('\n• ')}`);
+        setError(`${t('prov.analyzeWarn')}\n• ${res.errors.join('\n• ')}`);
       }
       setPhase('review');
     } catch (e: any) {
-      setError(errDetail(e, 'Falha ao analisar o projeto.'));
+      setError(errDetail(e, t('prov.analyzeFail')));
       setPhase('error');
     }
   };
@@ -111,7 +116,7 @@ const ProvisionPage = () => {
     try {
       manifest = JSON.parse(manifestText);
     } catch {
-      setError('O manifest não é um JSON válido. Corrija a sintaxe.');
+      setError(t('prov.invalidJson'));
       return;
     }
     setError(null);
@@ -126,7 +131,7 @@ const ProvisionPage = () => {
         setPhase('done-noreload');
       }
     } catch (e: any) {
-      setError(errDetail(e, 'Falha na provisão.'));
+      setError(errDetail(e, t('prov.provisionFail')));
       setPhase('error');
     }
   };
@@ -135,7 +140,7 @@ const ProvisionPage = () => {
     const startedAt = Date.now();
     while (!stopRef.current) {
       if (Date.now() - startedAt > POLL_TIMEOUT_MS) {
-        setError('A provisão demorou mais que o esperado. Verifique o terminal da Strapi.');
+        setError(t('prov.provisionFail'));
         setPhase('error');
         return;
       }
@@ -160,17 +165,12 @@ const ProvisionPage = () => {
     try {
       const { data } = await post('/mcp-chat/frontend/integrate', {});
       if (data.ok) {
-        setIntegrateMsg(
-          `✅ Religado! Arquivos atualizados: ${data.filesRewritten.join(', ')}. ` +
-          `Recarregue o preview para ver os dados do Strapi. (Original salvo como .bak.)`
-        );
+        setIntegrateMsg(t('prov.relinkOk', { files: data.filesRewritten.join(', ') }));
       } else {
-        setIntegrateMsg(
-          `⚠️ Não consegui religar: ${(data.errors || []).join('; ') || 'sem arquivo de dados'}.`
-        );
+        setIntegrateMsg(t('prov.relinkFail', { err: (data.errors || []).join('; ') || t('prov.noData') }));
       }
     } catch (e: any) {
-      setIntegrateMsg(`⚠️ ${errDetail(e, 'Falha ao religar.')}`);
+      setIntegrateMsg(`⚠️ ${errDetail(e, t('prov.relinkErr'))}`);
     } finally {
       setIntegrating(false);
     }
@@ -194,15 +194,15 @@ const ProvisionPage = () => {
     <Box padding={6} background="neutral100" style={{ minHeight: '100vh' }}>
       <Flex justifyContent="space-between" alignItems="center" paddingBottom={4}>
         <Box>
-          <Typography variant="alpha" tag="h1">Provisionar frontend</Typography>
-          <Typography variant="pi" textColor="neutral600">
-            Suba o .zip do seu frontend (Figma/Lovable, Next ou TanStack) — a IA infere o
-            modelo de conteúdo, você revisa, e o plugin cria tudo no Strapi.
-          </Typography>
+          <Typography variant="alpha" tag="h1">{t('prov.title')}</Typography>
+          <Typography variant="pi" textColor="neutral600">{t('prov.subtitle')}</Typography>
         </Box>
-        <Link to="..">
-          <Button variant="tertiary">← Voltar ao chat</Button>
-        </Link>
+        <Flex gap={2} alignItems="center">
+          <LangSwitcher />
+          <Link to="..">
+            <Button variant="tertiary">{t('prov.back')}</Button>
+          </Link>
+        </Flex>
       </Flex>
 
       <Box
@@ -213,12 +213,17 @@ const ProvisionPage = () => {
         style={{ maxWidth: 820, margin: '0 auto' }}
       >
         <Flex direction="column" alignItems="stretch" gap={4}>
+          {/* Stacks suportados */}
+          <Box>
+            <Typography variant="sigma" textColor="neutral600" tag="div">{t('prov.supported')}</Typography>
+            <Box paddingTop={2}><StackLogos /></Box>
+          </Box>
+
+          <Box height="1px" background="neutral200" />
+
           {/* Seleção do arquivo */}
-          <Typography variant="delta" tag="h2">1. Escolha o .zip do frontend</Typography>
-          <Typography textColor="neutral600">
-            Não precisa de <code>strapi.manifest.json</code>: se ele não existir, a IA cria um
-            analisando os dados do código (ex.: <code>src/data/*.ts</code>).
-          </Typography>
+          <Typography variant="delta" tag="h2">{t('prov.step1')}</Typography>
+          <Typography textColor="neutral600">{t('prov.step1desc')}</Typography>
 
           <input
             ref={inputRef}
@@ -236,27 +241,25 @@ const ProvisionPage = () => {
 
           <Flex gap={2} alignItems="center">
             <Button variant="secondary" onClick={() => inputRef.current?.click()} disabled={busy}>
-              Selecionar arquivo…
+              {t('prov.selectFile')}
             </Button>
             <Typography textColor={file ? 'neutral800' : 'neutral500'}>
-              {file ? file.name : 'Nenhum arquivo selecionado'}
+              {file ? file.name : t('prov.noFile')}
             </Typography>
           </Flex>
 
           {(phase === 'idle' || phase === 'analyzing') && (
             <Box paddingTop={2}>
               <Button onClick={analyze} loading={phase === 'analyzing'} disabled={!file || busy}>
-                Analisar projeto
+                {t('prov.analyze')}
               </Button>
             </Box>
           )}
 
           {phase === 'analyzing' && (
             <Flex gap={3} alignItems="center" background="primary100" padding={4} hasRadius>
-              <Loader small>Analisando…</Loader>
-              <Typography textColor="primary700">
-                Lendo o código e inferindo o modelo de conteúdo (content-types + seed)…
-              </Typography>
+              <Loader small>{t('prov.analyzing')}</Loader>
+              <Typography textColor="primary700">{t('prov.analyzingDesc')}</Typography>
             </Flex>
           )}
 
@@ -264,23 +267,21 @@ const ProvisionPage = () => {
           {phase === 'review' && (
             <>
               <Box height="1px" background="neutral200" />
-              <Typography variant="delta" tag="h2">2. Revise o modelo de conteúdo</Typography>
+              <Typography variant="delta" tag="h2">{t('prov.step2')}</Typography>
               <Flex gap={2} alignItems="center" wrap="wrap">
                 <Box background={inferred ? 'warning100' : 'success100'} padding={2} hasRadius>
                   <Typography variant="pi" textColor={inferred ? 'warning700' : 'success700'}>
-                    {inferred ? '🤖 Inferido pela IA' : '✓ Manifest do projeto'} • framework: {framework}
+                    {inferred ? t('prov.inferred') : t('prov.fromManifest')} • {t('prov.framework')}: {framework}
                   </Typography>
                 </Box>
                 {filesAnalyzed.length > 0 && (
                   <Typography variant="pi" textColor="neutral600">
-                    Analisou: {filesAnalyzed.slice(0, 6).join(', ')}
+                    {t('prov.analyzed')}: {filesAnalyzed.slice(0, 6).join(', ')}
                     {filesAnalyzed.length > 6 ? ` +${filesAnalyzed.length - 6}` : ''}
                   </Typography>
                 )}
               </Flex>
-              <Typography variant="pi" textColor="neutral600">
-                Edite o JSON se quiser ajustar nomes, tipos ou o conteúdo semeado antes de criar.
-              </Typography>
+              <Typography variant="pi" textColor="neutral600">{t('prov.editJson')}</Typography>
               <Textarea
                 name="manifest"
                 value={manifestText}
@@ -289,9 +290,9 @@ const ProvisionPage = () => {
               />
               <Flex gap={2}>
                 <Button onClick={provision} disabled={!manifestText.trim()}>
-                  Provisionar
+                  {t('prov.provision')}
                 </Button>
-                <Button variant="tertiary" onClick={reset}>Recomeçar</Button>
+                <Button variant="tertiary" onClick={reset}>{t('prov.restart')}</Button>
               </Flex>
             </>
           )}
@@ -300,15 +301,10 @@ const ProvisionPage = () => {
           {phase === 'provisioning' && (
             <Flex direction="column" gap={2} background="primary100" padding={4} hasRadius>
               <Flex gap={3} alignItems="center">
-                <Loader small>Provisionando…</Loader>
-                <Typography fontWeight="bold" textColor="primary700">
-                  Configurando tudo — isso leva alguns segundos
-                </Typography>
+                <Loader small>{t('prov.provisioning')}</Loader>
+                <Typography fontWeight="bold" textColor="primary700">{t('prov.provisioningTitle')}</Typography>
               </Flex>
-              <Typography variant="pi" textColor="neutral700">
-                A Strapi está reiniciando para reconhecer as content-types, depois semeia o
-                conteúdo, libera leitura pública e liga o preview. Não feche esta página.
-              </Typography>
+              <Typography variant="pi" textColor="neutral700">{t('prov.provisioningDesc')}</Typography>
             </Flex>
           )}
 
@@ -322,24 +318,24 @@ const ProvisionPage = () => {
           {phase === 'ready' && done && (
             <Box background="success100" padding={4} hasRadius>
               <Typography variant="beta" textColor="success700" tag="div">
-                ✅ Tudo pronto! Você já pode ver o preview.
+                {t('prov.doneTitle')}
               </Typography>
               <Box paddingTop={3}>
                 <Typography variant="pi" textColor="neutral700" tag="div">
-                  Content-types criadas: {done.contentTypes.join(', ')}
+                  {t('prov.typesCreated')} {done.contentTypes.join(', ')}
                 </Typography>
                 {done.seedCreated.length > 0 && (
                   <Typography variant="pi" textColor="neutral700" tag="div">
-                    Conteúdo semeado: {done.seedCreated.map((s) => `${s.uid} (${s.count})`).join(', ')}
+                    {t('prov.seeded')} {done.seedCreated.map((s) => `${s.uid} (${s.count})`).join(', ')}
                   </Typography>
                 )}
                 <Typography variant="pi" textColor="neutral700" tag="div">
-                  Frontend em: <code>{done.frontendDir}</code>
+                  {t('prov.frontendAt')} <code>{done.frontendDir}</code>
                 </Typography>
               </Box>
               <Box paddingTop={3}>
                 <Typography variant="pi" textColor="neutral700" tag="div">
-                  Para ver o preview, rode o frontend (uma vez):
+                  {t('prov.runFrontend')}
                 </Typography>
                 <Box background="neutral0" padding={2} hasRadius marginTop={1}
                   style={{ fontFamily: 'monospace', fontSize: 12 }}>
@@ -348,12 +344,11 @@ const ProvisionPage = () => {
               </Box>
               <Box paddingTop={3}>
                 <Typography variant="pi" textColor="neutral700" tag="div">
-                  Religar o frontend ao Strapi (snapshot): troca os dados hardcoded pelos do
-                  Strapi, mantendo as imagens. Os componentes não mudam.
+                  {t('prov.relinkDesc')}
                 </Typography>
                 <Box paddingTop={1}>
                   <Button onClick={integrate} loading={integrating} variant="default">
-                    Religar dados ao Strapi
+                    {t('prov.relink')}
                   </Button>
                 </Box>
                 {integrateMsg && (
@@ -367,9 +362,9 @@ const ProvisionPage = () => {
 
               <Flex gap={2} paddingTop={3}>
                 <a href={done.previewUrl} target="_blank" rel="noreferrer">
-                  <Button variant="success">Abrir {done.previewUrl} ↗</Button>
+                  <Button variant="success">{t('prov.open')} {done.previewUrl} ↗</Button>
                 </a>
-                <Button variant="tertiary" onClick={reset}>Provisionar outro</Button>
+                <Button variant="tertiary" onClick={reset}>{t('prov.provisionAnother')}</Button>
               </Flex>
             </Box>
           )}

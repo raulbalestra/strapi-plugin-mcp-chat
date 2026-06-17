@@ -1,7 +1,10 @@
-import { useRef, useState } from 'react';
+import { useRef, useState, useEffect } from 'react';
 import { Box, Flex, Typography, Button, Textarea, TextInput } from '@strapi/design-system';
 import { useFetchClient } from '@strapi/strapi/admin';
 import { Link } from 'react-router-dom';
+import { useLang, makeT } from '../i18n';
+import { LangSwitcher } from '../components/LangSwitcher';
+import { Onboarding, tourWasSeen } from '../components/Onboarding';
 
 type Msg = { role: 'user' | 'assistant'; content: string; image?: string | null };
 
@@ -16,12 +19,18 @@ const DEFAULT_PREVIEW_URL = (() => {
 
 const HomePage = () => {
   const { post } = useFetchClient();
+  const [lang] = useLang();
+  const t = makeT(lang);
 
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Onboarding (mini-curso): abre na 1ª vez; reabrível pelo botão Tour.
+  const [tourOpen, setTourOpen] = useState(false);
+  useEffect(() => { if (!tourWasSeen()) setTourOpen(true); }, []);
 
   // Live preview
   const [previewOn, setPreviewOn] = useState(false);
@@ -50,7 +59,7 @@ const HomePage = () => {
       stream.getVideoTracks()[0].addEventListener('ended', stopShare);
       setSharing(true);
     } catch {
-      setError('Não foi possível iniciar o compartilhamento de tela.');
+      setError(t('home.errShare'));
     }
   };
   const stopShare = () => {
@@ -98,15 +107,17 @@ const HomePage = () => {
       const payload = {
         messages: next.map((m) => ({ role: m.role, content: m.content })),
         image,
+        lang,
+        previewUrl: previewOn ? previewUrl : null,
       };
       const { data } = await post('/mcp-chat/message', payload);
-      const reply = data?.reply || '(sem resposta)';
+      const reply = data?.reply || t('home.noReply');
       setMessages((cur) => [...cur, { role: 'assistant', content: reply }]);
       if (previewOn) setIframeKey((k) => k + 1);
       if (voiceOn) playTTS(reply);
     } catch (e: any) {
       const detail =
-        e?.response?.data?.error?.message || e?.message || 'Erro ao falar com a IA.';
+        e?.response?.data?.error?.message || e?.message || t('home.errChat');
       setError(detail);
     } finally {
       setLoading(false);
@@ -144,7 +155,7 @@ const HomePage = () => {
       recorder.start();
       setRecording(true);
     } catch {
-      setError('Não foi possível acessar o microfone.');
+      setError(t('home.errMic'));
     }
   };
   const stopRecording = () => {
@@ -157,14 +168,15 @@ const HomePage = () => {
       const ext = blob.type.includes('mp4') ? 'mp4' : 'webm';
       const form = new FormData();
       form.append('audio', blob, `audio.${ext}`);
-      const { data } = await post('/mcp-chat/stt', form);
+      form.append('language', lang);
+      const { data } = await post(`/mcp-chat/stt?language=${lang}`, form);
       const text = (data?.text || '').trim();
       setLoading(false);
       if (text) sendMessage(text);
-      else setError('Não consegui entender o áudio.');
+      else setError(t('home.errAudioEmpty'));
     } catch (e: any) {
       setLoading(false);
-      setError(e?.response?.data?.error?.message || 'Erro na transcrição.');
+      setError(e?.response?.data?.error?.message || t('home.errStt'));
     }
   };
 
@@ -173,9 +185,9 @@ const HomePage = () => {
     <Flex direction="column" alignItems="stretch" gap={4} height="100%">
       <Flex justifyContent="space-between" alignItems="center">
         <Box>
-          <Typography variant="beta" tag="h1">MCP Chat</Typography>
+          <Typography variant="beta" tag="h1">{t('home.title')}</Typography>
           <Typography variant="pi" textColor="neutral600">
-            IA via MCP {sharing ? '• vendo sua tela' : ''} {voiceOn ? '• voz ON' : ''}
+            {t('home.subtitle')} {sharing ? t('home.seeingScreen') : ''} {voiceOn ? t('home.voiceOn') : ''}
           </Typography>
         </Box>
         <Flex gap={1}>
@@ -184,14 +196,14 @@ const HomePage = () => {
             variant={voiceOn ? 'success-light' : 'tertiary'}
             onClick={() => setVoiceOn((v) => !v)}
           >
-            {voiceOn ? 'Voz: ON' : 'Voz: OFF'}
+            {voiceOn ? t('home.voiceBtnOn') : t('home.voiceBtnOff')}
           </Button>
           <Button
             size="S"
             variant={sharing ? 'danger-light' : 'secondary'}
             onClick={sharing ? stopShare : startShare}
           >
-            {sharing ? 'Parar tela' : 'Compartilhar tela'}
+            {sharing ? t('home.shareStop') : t('home.shareStart')}
           </Button>
         </Flex>
       </Flex>
@@ -205,9 +217,7 @@ const HomePage = () => {
         style={{ overflowY: 'auto', minHeight: 240 }}
       >
         {messages.length === 0 && (
-          <Typography textColor="neutral500">
-            Escreva, fale (🎤) ou compartilhe a tela. Ex.: “Quais content-types existem?”.
-          </Typography>
+          <Typography textColor="neutral500">{t('home.empty')}</Typography>
         )}
         <Flex direction="column" alignItems="stretch" gap={3}>
           {messages.map((m, i) => (
@@ -218,7 +228,7 @@ const HomePage = () => {
               background={m.role === 'user' ? 'primary100' : 'neutral100'}
             >
               <Typography variant="sigma" textColor={m.role === 'user' ? 'primary600' : 'neutral600'}>
-                {m.role === 'user' ? 'Você' : 'IA'}
+                {m.role === 'user' ? t('home.you') : t('home.ai')}
               </Typography>
               <Box paddingTop={1}>
                 <Typography style={{ whiteSpace: 'pre-wrap' }}>{m.content}</Typography>
@@ -234,7 +244,7 @@ const HomePage = () => {
               )}
             </Box>
           ))}
-          {loading && <Typography textColor="neutral500">Processando…</Typography>}
+          {loading && <Typography textColor="neutral500">{t('home.processing')}</Typography>}
         </Flex>
       </Box>
 
@@ -249,12 +259,12 @@ const HomePage = () => {
           variant={recording ? 'danger-light' : 'tertiary'}
           onClick={recording ? stopRecording : startRecording}
         >
-          {recording ? '⏹ Parar' : '🎤 Falar'}
+          {recording ? t('home.recStop') : t('home.rec')}
         </Button>
         <Box grow={1}>
           <Textarea
             name="message"
-            placeholder="Escreva… (Cmd/Ctrl+Enter envia)"
+            placeholder={t('home.placeholder')}
             value={input}
             onChange={(e: any) => setInput(e.target.value)}
             onKeyDown={(e: any) => {
@@ -263,7 +273,7 @@ const HomePage = () => {
           />
         </Box>
         <Button onClick={send} loading={loading} disabled={!input.trim()}>
-          Enviar
+          {t('home.send')}
         </Button>
       </Flex>
     </Flex>
@@ -274,13 +284,13 @@ const HomePage = () => {
       <Flex gap={2} alignItems="center">
         <Box grow={1}>
           <TextInput
-            aria-label="URL do preview"
+            aria-label={t('home.previewUrlLabel')}
             value={previewUrl}
             onChange={(e: any) => setPreviewUrl(e.target.value)}
           />
         </Box>
         <Button size="S" variant="tertiary" onClick={() => setIframeKey((k) => k + 1)}>
-          Recarregar
+          {t('home.reload')}
         </Button>
       </Flex>
       <Box
@@ -304,15 +314,19 @@ const HomePage = () => {
     <Box padding={6} background="neutral100" style={{ minHeight: '100vh' }}>
       <video ref={videoRef} autoPlay muted style={{ display: 'none' }} />
 
+      <Onboarding lang={lang} open={tourOpen} onClose={() => setTourOpen(false)} />
+
       <Flex justifyContent="flex-end" gap={2} paddingBottom={4}>
+        <Button variant="tertiary" onClick={() => setTourOpen(true)}>{t('home.tour')}</Button>
+        <LangSwitcher />
         <Link to="provision">
-          <Button variant="secondary">Provisionar frontend</Button>
+          <Button variant="secondary">{t('home.provision')}</Button>
         </Link>
         <Button
           variant={previewOn ? 'success-light' : 'default'}
           onClick={() => setPreviewOn((v) => !v)}
         >
-          {previewOn ? 'Live Preview: ON' : 'Live Preview: OFF'}
+          {previewOn ? t('home.previewOn') : t('home.previewOff')}
         </Button>
       </Flex>
 
