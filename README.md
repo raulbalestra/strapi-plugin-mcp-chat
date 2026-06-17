@@ -1,8 +1,15 @@
-# strapi-plugin-mcp-chat
+<p align="center">
+  <img src="./assets/logo.png" alt="MCP Chat" width="120" height="120" />
+</p>
+
+<h1 align="center">strapi-plugin-mcp-chat</h1>
 
 > AI chat inside the **Strapi 5** admin that actually **reads and edits your content** — including fields nested in **components and dynamic zones** — through **MCP**. Comes with **voice** (speech-to-text / text-to-speech) and a **side-by-side live preview** of your frontend.
 
 Ask in plain language ("change the homepage hero title to …") and the assistant finds the text across all content-types, edits it, and publishes — then reloads the preview on the very page you were looking at.
+
+[![npm](https://img.shields.io/npm/v/strapi-plugin-mcp-chat.svg)](https://www.npmjs.com/package/strapi-plugin-mcp-chat)
+[![license](https://img.shields.io/npm/l/strapi-plugin-mcp-chat.svg)](./LICENSE)
 
 https://github.com/raulbalestra/strapi-plugin-mcp-chat
 
@@ -19,6 +26,29 @@ https://github.com/raulbalestra/strapi-plugin-mcp-chat
 - 🌍 **Translate every page to any language** — create locales and translate all localized content via Strapi 5's native i18n, with **no length limits and no context blowups** (see below).
 - 🌐 Bilingual UI/prompts (PT / EN).
 
+## Why MCP Chat vs. other AI/MCP plugins
+
+There are AI and MCP plugins for Strapi, but they solve different problems. Most are
+either **read-only MCP servers** (let an external AI *inspect* your data) or **text
+generators** (drop a paragraph into a field). MCP Chat is the only one that lets an
+assistant **operate your content end-to-end** — find it anywhere (incl. components &
+dynamic zones), edit it, publish it, translate it — *and shows the result in a live
+preview next to the editor*.
+
+| | **MCP Chat** | AI-SDK / chat plugins | Built-in Strapi AI | MCP-server plugins |
+|---|:---:|:---:|:---:|:---:|
+| AI chat in the admin | ✅ | ✅ | partial | ❌ |
+| **Reads & edits** content (components + dynamic zones) | ✅ | ✅ | ❌ (models schema) | ❌ (read-only) |
+| **Side-by-side live preview** (any plan) | ✅ | ❌ | ❌ | ❌ |
+| Voice (STT + TTS) | ✅ | some | ❌ | ❌ |
+| **Frontend provisioning** (Next.js / TanStack) | ✅ | ❌ | ❌ | ❌ |
+| Bulk translate via native i18n | ✅ | ❌ | partial | ❌ |
+| Native MCP server, in-process (no token/HTTP) | ✅ | varies | ✅ | varies |
+| Open source (MIT) | ✅ | varies | ❌ (paid plan) | varies |
+
+**What's unique here:** the **docked live preview** that follows the page you're editing,
+and **frontend provisioning** from a `strapi.manifest.json` — no other plugin does either.
+
 ## Requirements
 
 - **Strapi `>= 5.47.0`** — required for the built-in [native MCP server](https://docs.strapi.io/cms/features/strapi-mcp-server) that this plugin consumes.
@@ -27,8 +57,9 @@ https://github.com/raulbalestra/strapi-plugin-mcp-chat
 ## Install
 
 ```bash
-# Straight from GitHub (not on npm yet):
-npm install github:raulbalestra/strapi-plugin-mcp-chat
+npm install strapi-plugin-mcp-chat
+# or pull the latest unreleased code straight from GitHub:
+# npm install github:raulbalestra/strapi-plugin-mcp-chat
 ```
 
 > Or just try the ready-to-run [Launchpad demo](https://github.com/raulbalestra/launchpad-mcp-chat) (the plugin is vendored there).

@@ -1,0 +1,16 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#4945FF"/>
+      <stop offset="1" stop-color="#7B79FF"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <!-- chat bubble -->
+  <path d="M136 132h240a36 36 0 0 1 36 36v140a36 36 0 0 1-36 36H252l-72 60v-60h-44a36 36 0 0 1-36-36V168a36 36 0 0 1 36-36z" fill="#FFFFFF"/>
+  <!-- MCP nodes (model context protocol motif) -->
+  <circle cx="200" cy="238" r="20" fill="#4945FF"/>
+  <circle cx="312" cy="200" r="20" fill="#4945FF"/>
+  <circle cx="312" cy="276" r="20" fill="#4945FF"/>
+  <path d="M218 230l78-26M218 246l78 26" stroke="#4945FF" stroke-width="12" stroke-linecap="round"/>
+</svg>
