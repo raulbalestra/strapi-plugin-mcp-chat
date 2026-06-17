@@ -1,11 +1,14 @@
 /**
- * Tipos para os módulos de tool do MCP (padrão inspirado no exemplo do Paul
- * Bratslavsky: github.com/PaulBratslavsky/strapi-mcp-demo-and-tool-extension).
- * Cada tool é um módulo com um `register(registerTool, strapi)`.
+ * Tipos do MCP do plugin. As tools agora são DEFINIÇÕES puras criadas com
+ * `defineTool` (ver ./define.ts) e registradas a partir de um array — alinhado
+ * à direção do PR #26603 (`ai.mcp.defineTool`). Re-exportamos os tipos de
+ * `./define` aqui por conveniência/compatibilidade.
  */
-
-export type RegisterTool = (toolDef: Record<string, any>) => void;
-
-export type StrapiMcpToolModule = {
-  register: (registerTool: RegisterTool, strapi: any) => void;
-};
+export type {
+  McpToolDef,
+  McpResourceDef,
+  McpPromptDef,
+  McpToolResult,
+  McpAuth,
+  RegisterTool,
+} from './define';

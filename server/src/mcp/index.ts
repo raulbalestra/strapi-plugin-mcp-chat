@@ -1,8 +1,12 @@
 /**
  * Registra as tools de conteúdo do plugin no MCP server NATIVO da Strapi
- * (>= 5.47.0). Estrutura modular inspirada no padrão do exemplo do Paul
- * Bratslavsky: cada tool é um módulo em ./tools/*, agregado em ./tools/index.ts,
- * e aqui passamos por um loop chamando `tool.register(registerTool, strapi)`.
+ * (>= 5.47.0). Cada tool é uma DEFINIÇÃO pura (`defineTool`, em ./tools/*),
+ * agregada em ./tools/index.ts; aqui só percorremos o array chamando
+ * `mcp.registerTool(def)` (padrão "define + register-from-array").
+ *
+ * Alinhado à direção do PR #26603 (`ai.mcp.defineTool`): quando o helper
+ * estável sair, troca-se o import de `./define` por `import { ai } from
+ * "@strapi/strapi"` — as definições não mudam. Ver server/src/mcp/define.ts.
  *
  * Deve rodar no `register()` do plugin, ANTES de o MCP server iniciar.
  */
@@ -18,7 +22,6 @@ export const registerMcpTools = (strapi: any) => {
     );
     return;
   }
-  const { registerTool } = mcp;
-  for (const tool of tools) tool.register(registerTool, strapi);
+  for (const tool of tools) mcp.registerTool(tool);
   strapi.log.info(`[mcp-chat] ${tools.length} tools registradas no MCP nativo (mcp_chat_*).`);
 };

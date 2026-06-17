@@ -294,11 +294,16 @@ The plugin follows the documented Strapi 5 plugin APIs:
   (`register` / `bootstrap` / `destroy` / `config` / `controllers` / `services` / `routes`).
   Routes are declared with `type: 'admin'`, so the chat/STT/TTS endpoints require an
   authenticated admin session.
-- **MCP** — tools are registered with `strapi.ai.mcp.registerTool` during `register()`
-  (the documented extension point), using `z` from `@strapi/utils` for the schemas and
-  `auth.policies` (content-manager read/update/publish) for RBAC. They're organized in a
-  modular `server/src/mcp/` (one file per tool in `tools/`, aggregated and looped) following
-  the structure from [Paul Bratslavsky's MCP tool-extension example](https://github.com/PaulBratslavsky/strapi-mcp-demo-and-tool-extension).
+- **MCP** — tools are **defined** as pure objects with a local typed `defineTool` helper
+  (`server/src/mcp/define.ts`) and **registered from an array** via
+  `strapi.ai.mcp.registerTool` during `register()`, using `z` from `@strapi/utils` for the
+  schemas and `auth.policies` (content-manager read/update/publish) for RBAC. The
+  `defineTool`/`defineResource`/`definePrompt` identity functions infer each handler's
+  `args` from its input schema (no `any`) and keep the definitions side-effect-free —
+  mirroring the direction of Strapi's [PR #26603](https://github.com/strapi/strapi/pull/26603)
+  (`ai.mcp.defineTool` + the `import { ai } from "@strapi/strapi"` namespace). When that API
+  ships stable, migrating is a one-line import swap; until then the plugin stays on the
+  released `registerTool` so it runs on any Strapi ≥ 5.47 (no experimental build required).
 - **Admin** — `register()` uses only documented APIs (`app.addMenuLink`, `app.registerPlugin`).
 
 One intentional deviation: the **global floating chat** is mounted via its own React root
