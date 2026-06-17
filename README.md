@@ -19,6 +19,7 @@ https://github.com/raulbalestra/strapi-plugin-mcp-chat
 
 - 🤖 **AI chat in the admin** — a floating widget on every screen + a full-page view. Runs an agent loop on the OpenAI Chat Completions API.
 - ✏️ **Edits real content via MCP + Document Service** — `buscar_texto` finds a phrase across **all** content-types, single types, **components and dynamic zones** (recursive); `editar_campo` updates it (preserving the other components); `publicar` publishes.
+- 📝 **Draft-first by default** — the AI edits **drafts** and does **not** publish unless you ask (or flip the **Auto-publish** toggle). Pair it with the preview's **Draft / Live** switch to review unpublished changes before they go to production. See [Draft-first editing & previewing drafts](#draft-first-editing--previewing-drafts).
 - 🎙️ **Voice** — record a request (Whisper STT) and hear replies (OpenAI TTS).
 - 👁️ **Side-by-side preview panel** — the plugin's own docked iframe that shrinks the admin and shows your frontend; reloads after each edit and **stays on the same page + scroll position** (with the optional preview bridge below). This is a custom panel, *not* Strapi's official Live Preview (which is a Growth/Enterprise feature) — it works on any plan, including Community, and complements the official Preview if you have it configured.
 - 🖥️ **Optional browser control** — if a [Playwright MCP](https://github.com/microsoft/playwright-mcp) server is reachable, the agent can drive a real browser to verify changes.
@@ -192,6 +193,29 @@ export function PreviewBridge() {
 
 Then render `<PreviewBridge />` once in your root layout. The same idea works in any
 framework — just post `{ type: 'preview:location', href: location.href }` to `window.parent`.
+
+## Draft-first editing & previewing drafts
+
+Strapi's Draft & Publish lets editors stage changes before they go live. MCP Chat
+respects that:
+
+- **The AI edits drafts, never auto-publishes.** `editar_campo` always writes the
+  **draft** version. By default the agent stops there and tells you it saved a draft —
+  it only calls `publicar` when you explicitly ask ("publish this", "make it live") or
+  when you turn **Auto-publish ON** in the chat toolbar. The setting is remembered
+  (`localStorage` `mcp-chat-autopublish`, default off).
+- **Preview the draft before publishing.** The preview panel has a **📝 Draft / 🌐 Live**
+  toggle. In **Draft** it reloads the frontend with `?preview=1`; provisioned frontends
+  read that flag and fetch `status=draft` from the Content API, so you see unpublished
+  changes exactly as they'll look — without publishing. Flip to **Live** to compare with
+  what's currently public.
+
+**Draft preview contract (for custom / non-provisioned frontends):** when the iframe URL
+carries `?preview=1` (or `?status=draft`), fetch Strapi with `status: 'draft'` and an API
+token that can read drafts (`STRAPI_API_TOKEN`). Provisioned frontends get this wired
+automatically via the generated `strapi-client` data module. Note: draft fetching keys off
+the URL on the **client**, so with SSR the first server render may show published content
+until hydration — fine for preview, but don't rely on it for production rendering.
 
 ## How it works
 

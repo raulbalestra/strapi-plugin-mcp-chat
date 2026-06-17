@@ -28,6 +28,7 @@ const STR: Record<Lang, Record<string, string>> = {
     rec: '🎤 Enviar áudio', recStop: '⏹ Parar áudio', recTitle: 'Gravar áudio e enviar (transcreve e manda)',
     previewOn: '🖼 Preview: ON', previewOff: '🖼 Preview: OFF', previewTitle: 'Abrir/fechar o preview do site ao lado da Strapi',
     voiceOn: '🔊 Voz: ON', voiceOff: '🔈 Voz: OFF', voiceTitle: 'Ler as respostas em voz alta (TTS)',
+    pubOn: '🚀 Publicar: ON', pubOff: '📝 Rascunho', pubTitle: 'Auto-publicar OFF = a IA só salva rascunho (você revisa e publica). ON = publica direto no site.',
     shareOn: '🛑 Parar tela', shareOff: '🖥 Compart. tela', shareTitle: 'Compartilhar a tela com a IA',
     langTitle: 'Idioma do chat e da voz (PT-BR ↔ English)',
     seeingScreen: '• vendo sua tela ', voiceStatus: '• voz ON',
@@ -44,6 +45,7 @@ const STR: Record<Lang, Record<string, string>> = {
     rec: '🎤 Send audio', recStop: '⏹ Stop audio', recTitle: 'Record audio and send (transcribes and sends)',
     previewOn: '🖼 Preview: ON', previewOff: '🖼 Preview: OFF', previewTitle: 'Toggle the site preview next to Strapi',
     voiceOn: '🔊 Voice: ON', voiceOff: '🔈 Voice: OFF', voiceTitle: 'Read replies out loud (TTS)',
+    pubOn: '🚀 Publish: ON', pubOff: '📝 Draft', pubTitle: 'Auto-publish OFF = the AI only saves a draft (you review and publish). ON = publishes straight to the site.',
     shareOn: '🛑 Stop screen', shareOff: '🖥 Share screen', shareTitle: 'Share your screen with the AI',
     langTitle: 'Chat and voice language (PT-BR ↔ English)',
     seeingScreen: '• seeing your screen ', voiceStatus: '• voice ON',
@@ -66,6 +68,12 @@ export const FloatingChat = ({ previewOn, previewUrl, onTogglePreview, onReply }
   const [sharing, setSharing] = useState(false);
   const [voiceOn, setVoiceOn] = useState(false);
   const [recording, setRecording] = useState(false);
+  const [autoPublish, setAutoPublish] = useState<boolean>(() => {
+    try { return localStorage.getItem('mcp-chat-autopublish') === '1'; } catch { return false; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('mcp-chat-autopublish', autoPublish ? '1' : '0'); } catch { /* noop */ }
+  }, [autoPublish]);
   const [lang, setLang] = useState<Lang>(() => {
     try { return (localStorage.getItem('mcp-chat-lang') as Lang) || 'en'; } catch { return 'en'; }
   });
@@ -169,6 +177,8 @@ export const FloatingChat = ({ previewOn, previewUrl, onTogglePreview, onReply }
         // Página que o usuário está olhando no preview (se aberto). Dá à IA o
         // contexto do "isso aqui" sem precisar varrer o site inteiro.
         previewUrl: previewOn ? previewUrl : null,
+        // Draft-first: por padrão a IA só salva rascunho; só publica com isto ON.
+        autoPublish,
       });
       const reply = data?.reply || '(sem resposta)';
       setMessages((cur) => [...cur, { role: 'assistant', content: reply }]);
@@ -318,6 +328,10 @@ export const FloatingChat = ({ previewOn, previewUrl, onTogglePreview, onReply }
         <button style={btn(voiceOn)} onClick={() => setVoiceOn((v) => !v)}
           title={t.voiceTitle}>
           {voiceOn ? t.voiceOn : t.voiceOff}
+        </button>
+        <button style={btn(autoPublish)} onClick={() => setAutoPublish((v) => !v)}
+          title={t.pubTitle}>
+          {autoPublish ? t.pubOn : t.pubOff}
         </button>
         <button style={btn(sharing)} onClick={sharing ? stopShare : startShare}
           title={t.shareTitle}>

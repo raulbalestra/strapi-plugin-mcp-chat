@@ -41,6 +41,14 @@ const HomePage = () => {
   const [voiceOn, setVoiceOn] = useState(false);
   const [recording, setRecording] = useState(false);
 
+  // Draft-first: a IA só salva rascunho por padrão; publica só com isto ON.
+  const [autoPublish, setAutoPublish] = useState<boolean>(() => {
+    try { return localStorage.getItem('mcp-chat-autopublish') === '1'; } catch { return false; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('mcp-chat-autopublish', autoPublish ? '1' : '0'); } catch { /* noop */ }
+  }, [autoPublish]);
+
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
@@ -109,6 +117,7 @@ const HomePage = () => {
         image,
         lang,
         previewUrl: previewOn ? previewUrl : null,
+        autoPublish,
       };
       const { data } = await post('/mcp-chat/message', payload);
       const reply = data?.reply || t('home.noReply');
@@ -197,6 +206,14 @@ const HomePage = () => {
             onClick={() => setVoiceOn((v) => !v)}
           >
             {voiceOn ? t('home.voiceBtnOn') : t('home.voiceBtnOff')}
+          </Button>
+          <Button
+            size="S"
+            variant={autoPublish ? 'danger-light' : 'tertiary'}
+            onClick={() => setAutoPublish((v) => !v)}
+            title={t('home.pubTitle')}
+          >
+            {autoPublish ? t('home.pubOn') : t('home.pubOff')}
           </Button>
           <Button
             size="S"

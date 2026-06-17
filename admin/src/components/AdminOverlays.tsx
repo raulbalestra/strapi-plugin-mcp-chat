@@ -22,12 +22,35 @@ import { PreviewPanel } from './PreviewPanel';
 // edite na barra do painel — o valor fica salvo em localStorage.
 const FALLBACK_PREVIEW_URL = 'http://localhost:3000';
 const LS_KEY = 'mcp-chat-preview-url';
+const LS_DRAFT = 'mcp-chat-preview-draft';
 
 const initialPreviewUrl = (): string => {
   try {
     return localStorage.getItem(LS_KEY) || FALLBACK_PREVIEW_URL;
   } catch {
     return FALLBACK_PREVIEW_URL;
+  }
+};
+
+const initialDraft = (): boolean => {
+  try {
+    return localStorage.getItem(LS_DRAFT) === '1';
+  } catch {
+    return false;
+  }
+};
+
+/** Aplica/remove o flag `?preview=1` na URL do iframe. Em modo rascunho, o
+ *  frontend provisionado (e qualquer frontend que respeite o contrato de
+ *  preview) busca `status=draft` no Strapi em vez do conteúdo publicado. */
+const withPreviewFlag = (url: string, draft: boolean): string => {
+  try {
+    const u = new URL(url);
+    if (draft) u.searchParams.set('preview', '1');
+    else u.searchParams.delete('preview');
+    return u.toString();
+  } catch {
+    return url;
   }
 };
 
@@ -48,6 +71,8 @@ export const AdminOverlays = () => {
   const liveRef = useRef(initialPreviewUrl());
   const srcRef = useRef(initialPreviewUrl());
   const [iframeKey, setIframeKey] = useState(0);
+  // Modo rascunho do preview (mostra conteúdo não publicado).
+  const [draftPreview, setDraftPreview] = useState(initialDraft);
 
   // Auto-run do frontend provisionado SEMPRE que o preview é ligado.
   const [runLoading, setRunLoading] = useState(false);
@@ -150,7 +175,7 @@ export const AdminOverlays = () => {
     <>
       <PreviewPanel
         open={previewOn}
-        src={previewSrc}
+        src={withPreviewFlag(previewSrc, draftPreview)}
         displayUrl={liveHref}
         onUrl={navigate}
         iframeKey={iframeKey}
@@ -159,6 +184,15 @@ export const AdminOverlays = () => {
         loading={runLoading}
         loadingText={runText}
         loadingError={runError}
+        draft={draftPreview}
+        onToggleDraft={() => {
+          setDraftPreview((v) => {
+            const next = !v;
+            try { localStorage.setItem(LS_DRAFT, next ? '1' : '0'); } catch { /* noop */ }
+            return next;
+          });
+          setIframeKey((k) => k + 1); // recarrega o iframe com/sem o flag
+        }}
       />
       <FloatingChat
         previewOn={previewOn}

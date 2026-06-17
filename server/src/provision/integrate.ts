@@ -558,6 +558,18 @@ export function __getLocale(): string {
   } catch {}
   return __defaultLocale;
 }
+/** Status ativo: ?preview=1 ou ?status=draft na URL → rascunho (preview do
+ *  mcp-chat em modo Draft). Caso contrário, publicado. Só no cliente; no SSR
+ *  cai para "published" (ver a nota de draft preview no README). */
+export function __getStatus(): "draft" | "published" {
+  try {
+    if (typeof window !== "undefined") {
+      const sp = new URL(window.location.href).searchParams;
+      if (sp.get("preview") === "1" || sp.get("status") === "draft") return "draft";
+    }
+  } catch {}
+  return "published";
+}
 
 ${mapperCode}
 
@@ -565,11 +577,13 @@ const __store: Record<string, any> = {};
 export function hydrate(d: any) { if (d) for (const k of Object.keys(d)) __store[k] = d[k]; }
 
 export async function loadAllData(opts: { locale?: string; status?: "draft" | "published" } = {}) {
+  // Sem status explícito, herda do flag de preview na URL (?preview=1 → draft).
+  const __opts = { locale: opts.locale, status: opts.status || __getStatus() };
   const raw: Record<string, any> = {};
   await Promise.all(
     __cts.map(async (c: any) => {
       try {
-        raw[c.s] = c.k === "singleType" ? await fetchSingle(c.s, opts) : await fetchCollection(c.p, opts);
+        raw[c.s] = c.k === "singleType" ? await fetchSingle(c.s, __opts) : await fetchCollection(c.p, __opts);
       } catch {
         raw[c.s] = c.k === "singleType" ? null : [];
       }

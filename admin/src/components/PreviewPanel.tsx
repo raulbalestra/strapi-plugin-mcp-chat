@@ -27,12 +27,15 @@ type Props = {
   loading?: boolean;
   loadingText?: string;
   loadingError?: boolean;
+  /** modo rascunho: mostra conteúdo não publicado (draft) em vez do publicado. */
+  draft?: boolean;
+  onToggleDraft?: () => void;
 };
 
 const MIN_W = 320;
 const clampW = (w: number) => Math.max(MIN_W, Math.min(window.innerWidth - 360, w));
 
-export const PreviewPanel = ({ open, src, displayUrl, onUrl, iframeKey, onReload, onClose, loading, loadingText, loadingError }: Props) => {
+export const PreviewPanel = ({ open, src, displayUrl, onUrl, iframeKey, onReload, onClose, loading, loadingText, loadingError, draft, onToggleDraft }: Props) => {
   const [width, setWidth] = useState(() => Math.round(window.innerWidth * 0.42));
   const [draftUrl, setDraftUrl] = useState(displayUrl);
   const [resizing, setResizing] = useState(false);
@@ -132,6 +135,24 @@ export const PreviewPanel = ({ open, src, displayUrl, onUrl, iframeKey, onReload
             border: '1px solid #4a4a6a', background: '#0f0f1a', color: '#fff',
           }}
         />
+        {onToggleDraft && (
+          <button
+            onClick={onToggleDraft}
+            title={
+              draft
+                ? 'Mostrando RASCUNHO (conteúdo não publicado). Clique para ver o publicado (Live).'
+                : 'Mostrando publicado (Live). Clique para ver o RASCUNHO (draft).'
+            }
+            style={{
+              ...hdrBtn,
+              background: draft ? '#8c4bff' : '#2a2a45',
+              borderColor: draft ? '#8c4bff' : '#4a4a6a',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {draft ? '📝 Draft' : '🌐 Live'}
+          </button>
+        )}
         <button onClick={onReload} title="Recarregar" style={hdrBtn}>↻</button>
         <button onClick={onClose} title="Fechar" style={hdrBtn}>✕</button>
       </div>

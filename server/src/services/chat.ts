@@ -25,6 +25,12 @@ type ChatInput = {
   lang?: Lang;
   /** URL da página aberta no preview — contexto do "isso aqui". */
   previewUrl?: string | null;
+  /**
+   * Política de publicação. `false` (default) = modo RASCUNHO: o agente edita o
+   * draft e NÃO publica, a menos que o usuário peça explicitamente. `true` =
+   * auto-publicar após cada edição (comportamento "live" antigo).
+   */
+  autoPublish?: boolean;
 };
 
 const MODEL = process.env.OPENAI_CHAT_MODEL || 'gpt-4o';
@@ -42,9 +48,9 @@ Ferramentas de conteúdo:
 Fluxo padrão quando o usuário pede uma mudança no site (por texto, voz ou mostrando a tela):
 1. Use buscar_texto com um trecho distintivo do texto a alterar (sem rótulos de status).
 2. Se houver mais de um resultado, escolha o mais provável pelo contexto (e diga qual escolheu); se ambíguo de verdade, pergunte.
-3. editar_campo passando o mesmo uid, documentId e path do resultado, com o novo valor.
-4. publicar a entrada.
-5. Confirme em 1 frase o que foi alterado e publicado (content-type, campo, antes → depois).
+3. editar_campo passando o mesmo uid, documentId e path do resultado, com o novo valor. Isso salva como RASCUNHO (não publica).
+4. Decida se publica ou não conforme a POLÍTICA DE PUBLICAÇÃO indicada mais abaixo.
+5. Confirme em 1 frase o que foi alterado (content-type, campo, antes → depois) e se ficou como rascunho ou foi publicado.
 
 Ferramentas de tradução / idiomas (i18n):
 - listar_locales(): mostra os idiomas configurados e o default.
@@ -71,9 +77,9 @@ Content tools:
 Default flow when the user asks for a site change (by text, voice or by showing their screen):
 1. Use buscar_texto with a distinctive snippet of the text to change (no status labels).
 2. If there is more than one result, pick the most likely from context (and say which); if truly ambiguous, ask.
-3. editar_campo passing the same uid, documentId and path from the result, with the new value.
-4. publicar the entry.
-5. Confirm in one sentence what was changed and published (content-type, field, before → after).
+3. editar_campo passing the same uid, documentId and path from the result, with the new value. This saves a DRAFT (does not publish).
+4. Decide whether to publish based on the PUBLISH POLICY stated below.
+5. Confirm in one sentence what was changed (content-type, field, before → after) and whether it stayed a draft or was published.
 
 Translation / language tools (i18n):
 - listar_locales(): shows configured languages and the default.
@@ -93,7 +99,7 @@ Be concise and actionable. ALWAYS answer in English.`,
 };
 
 export default ({ strapi }: { strapi: any }) => ({
-  async chat({ messages, image, lang = 'pt', previewUrl }: ChatInput) {
+  async chat({ messages, image, lang = 'pt', previewUrl, autoPublish = false }: ChatInput) {
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
       throw new Error(
@@ -156,7 +162,17 @@ export default ({ strapi }: { strapi: any }) => ({
       pt: `\n\nVocê também controla um navegador real via ferramentas browser_* (Playwright), apontado para o ADMIN DA STRAPI em ${adminBase} (o backend — é aqui que o conteúdo muda de verdade, NÃO no site público). Pode navegar (browser_navigate), clicar, digitar, rolar, tirar seus próprios screenshots (browser_take_screenshot) e inspecionar console/erros. Prefira sempre suas ferramentas diretas (buscar_texto/editar_campo/publicar) para alterar conteúdo; use o navegador para VERIFICAR no admin que a edição/publicação ficou correta, ou para fluxos da UI que as ferramentas diretas não cobrem.`,
       en: `\n\nYou also control a real browser via browser_* tools (Playwright), pointed at the STRAPI ADMIN at ${adminBase} (the backend — this is where content actually changes, NOT the public site). You can navigate (browser_navigate), click, type, scroll, take your own screenshots (browser_take_screenshot) and inspect console/errors. Always prefer your direct tools (buscar_texto/editar_campo/publicar) to change content; use the browser to VERIFY in the admin that the edit/publish landed, or for admin UI flows the direct tools don't cover.`,
     };
-    const systemContent = SYSTEM[language] + (hasBrowser ? BROWSER_NOTE[language] : '');
+    // ── Política de publicação (draft-first por padrão) ───────────────────────
+    const PUBLISH_POLICY: Record<Lang, string> = {
+      pt: autoPublish
+        ? `\n\nPOLÍTICA DE PUBLICAÇÃO: AUTO-PUBLICAR está LIGADO. Depois de editar_campo, chame publicar para deixar a mudança no ar. Em traduzir, use publish:true (default).`
+        : `\n\nPOLÍTICA DE PUBLICAÇÃO: MODO RASCUNHO (auto-publicar DESLIGADO). NÃO chame publicar a menos que o usuário peça explicitamente ("publica", "põe no ar", "publish"). Depois de editar_campo, PARE e avise que a alteração foi salva como RASCUNHO para revisão (ela já aparece no preview em modo rascunho, mas ainda não no site público). Em traduzir, passe publish:false. Se o usuário pedir para publicar, aí sim use publicar (ou traduzir com publish:true).`,
+      en: autoPublish
+        ? `\n\nPUBLISH POLICY: AUTO-PUBLISH is ON. After editar_campo, call publicar to make the change live. For traduzir, use publish:true (default).`
+        : `\n\nPUBLISH POLICY: DRAFT MODE (auto-publish OFF). Do NOT call publicar unless the user explicitly asks ("publish", "make it live", "publica"). After editar_campo, STOP and tell them the change was saved as a DRAFT for review (it already shows in the preview when in draft mode, but not on the public site yet). For traduzir, pass publish:false. If the user asks to publish, then use publicar (or traduzir with publish:true).`,
+    };
+    const systemContent =
+      SYSTEM[language] + (hasBrowser ? BROWSER_NOTE[language] : '') + PUBLISH_POLICY[language];
 
     // ── Monta a conversa; anexa imagem da tela à última mensagem do usuário ──
     const convo: any[] = [{ role: 'system', content: systemContent }];
