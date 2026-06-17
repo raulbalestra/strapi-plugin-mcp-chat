@@ -28,28 +28,27 @@ https://github.com/raulbalestra/strapi-plugin-mcp-chat
 - 🌐 **Fully bilingual (PT / EN)** — both the AI prompts/voice *and* the plugin's own admin pages, switchable with one click (the choice is shared across the chat and the menu pages).
 - 🎓 **Built-in onboarding tour** — a first-run mini-course (re-openable any time via **❓ Tour**) walks new users through chat, editing, live preview, provisioning and translation.
 
-## Why MCP Chat vs. other AI/MCP plugins
+## What makes MCP Chat unique
 
-There are AI and MCP plugins for Strapi, but they solve different problems. Most are
-either **read-only MCP servers** (let an external AI *inspect* your data) or **text
-generators** (drop a paragraph into a field). MCP Chat is the only one that lets an
-assistant **operate your content end-to-end** — find it anywhere (incl. components &
-dynamic zones), edit it, publish it, translate it — *and shows the result in a live
-preview next to the editor*.
+MCP Chat is built on Strapi 5's **native MCP server** and focuses on letting an assistant
+**operate your content end-to-end** — find text anywhere (including fields nested in
+components and dynamic zones), edit it as a draft, publish it, and translate it — while you
+watch the result in a **live preview right next to the editor**.
 
-| | **MCP Chat** | AI-SDK / chat plugins | Built-in Strapi AI | MCP-server plugins |
-|---|:---:|:---:|:---:|:---:|
-| AI chat in the admin | ✅ | ✅ | partial | ❌ |
-| **Reads & edits** content (components + dynamic zones) | ✅ | ✅ | ❌ (models schema) | ❌ (read-only) |
-| **Side-by-side live preview** (any plan) | ✅ | ❌ | ❌ | ❌ |
-| Voice (STT + TTS) | ✅ | some | ❌ | ❌ |
-| **Frontend provisioning** (Next.js / TanStack) | ✅ | ❌ | ❌ | ❌ |
-| Bulk translate via native i18n | ✅ | ❌ | partial | ❌ |
-| Native MCP server, in-process (no token/HTTP) | ✅ | varies | ✅ | varies |
-| Open source (MIT) | ✅ | varies | ❌ (paid plan) | varies |
+A few things that set it apart:
 
-**What's unique here:** the **docked live preview** that follows the page you're editing,
-and **frontend provisioning** from a `strapi.manifest.json` — no other plugin does either.
+- 👁️ **Docked, side-by-side live preview** that follows the exact page you're editing and
+  can show **drafts** before they're published — on any plan, including Community.
+- 🧱 **Frontend provisioning** from a `strapi.manifest.json` (Next.js / TanStack Start): the
+  plugin infers the content model, creates the content-types, seeds the data and wires the
+  preview for you.
+- 📝 **Draft-first & safe**: edits go to drafts and nothing is published until you say so.
+- ✏️ **Operates content in place**: finds and edits text nested in components and dynamic
+  zones, then publishes — not just generating text into a single field.
+- 🎙️ **Voice** (speech-to-text + text-to-speech) and a **bilingual** UI/prompts (PT / EN).
+
+It's a complement to the rest of Strapi's AI ecosystem, not a replacement — reach for it
+when you want the "chat that edits your content with a live preview" workflow.
 
 ## Requirements
 
