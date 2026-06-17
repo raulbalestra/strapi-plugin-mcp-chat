@@ -1,6 +1,6 @@
 {
   "name": "strapi-plugin-mcp-chat",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "AI chat inside the Strapi 5 admin that reads and edits your content (incl. components & dynamic zones) via MCP, with voice and a side-by-side live preview.",
   "keywords": [
     "strapi",

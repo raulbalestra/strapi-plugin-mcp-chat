@@ -204,6 +204,7 @@ respects that:
   it only calls `publicar` when you explicitly ask ("publish this", "make it live") or
   when you turn **Auto-publish ON** in the chat toolbar. The setting is remembered
   (`localStorage` `mcp-chat-autopublish`, default off).
+- **Content-types without Draft & Publish are handled correctly.** Draft & Publish is per content-type and off by default; `publish()` only exists when it's enabled (calling it otherwise throws, per the Strapi 5 docs). When a type has no Draft & Publish, the edit *is* the live value — so the plugin skips publishing (no error) and the assistant tells you the change is already live.
 - **Preview the draft before publishing.** The preview panel has a **📝 Draft / 🌐 Live**
   toggle. In **Draft** it reloads the frontend with `?preview=1`; provisioned frontends
   read that flag and fetch `status=draft` from the Content API, so you see unpublished

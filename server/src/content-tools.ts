@@ -37,6 +37,12 @@ export function createContentTools(strapi: any) {
       strapi.components?.[uid]?.attributes ||
       {}) as Record<string, any>;
 
+  // Draft & Publish é por content-type e vem DESLIGADO por padrão (docs Strapi 5).
+  // `publish()`/`unpublish()` SÓ existem quando está ligado — chamar sem D&P
+  // lança erro. Por isso checamos antes de publicar.
+  const hasDraftAndPublish = (uid: string): boolean =>
+    strapi.contentTypes?.[uid]?.options?.draftAndPublish === true;
+
   // Populate profundo: components (simples/repetíveis), dynamic zones (com `on`
   // por componente) e mídia/relações. `seen` evita recursão infinita.
   const buildPopulate = (attributes: Record<string, any>, seen = new Set<string>()): any => {
@@ -112,6 +118,7 @@ export function createContentTools(strapi: any) {
       } catch {
         continue;
       }
+      const dp = hasDraftAndPublish(ct.uid);
       for (const e of entries) {
         walkFind(e, attributes, [], needle, (path, campo, valor) => {
           matches.push({
@@ -121,6 +128,9 @@ export function createContentTools(strapi: any) {
             path,
             campo,
             valor_atual: valor.length > 300 ? valor.slice(0, 300) + '…' : valor,
+            // draftAndPublish=false → não há rascunho; a edição já é o conteúdo
+            // vivo e não há o que publicar (a IA deve avisar o usuário).
+            draftAndPublish: dp,
           });
         });
       }
@@ -179,7 +189,7 @@ export function createContentTools(strapi: any) {
       const updated = await strapi
         .documents(uid)
         .update({ documentId, ...loc, data: { [topAttr]: novo_valor } });
-      return { ok: true, uid, documentId: updated?.documentId || documentId, path: p, novo_valor, locale };
+      return { ok: true, uid, documentId: updated?.documentId || documentId, path: p, novo_valor, locale, draftAndPublish: hasDraftAndPublish(uid) };
     }
 
     // Campo aninhado → busca profunda, muta no caminho, sanitiza e regrava o
@@ -196,7 +206,7 @@ export function createContentTools(strapi: any) {
     cur[p[p.length - 1] as any] = novo_valor;
     const data = { [topAttr]: sanitizeAttr(entry[topAttr], ad) };
     const updated = await strapi.documents(uid).update({ documentId, ...loc, data });
-    return { ok: true, uid, documentId: updated?.documentId || documentId, path: p, novo_valor, locale };
+    return { ok: true, uid, documentId: updated?.documentId || documentId, path: p, novo_valor, locale, draftAndPublish: hasDraftAndPublish(uid) };
   };
 
   const publicar = async ({
@@ -209,6 +219,17 @@ export function createContentTools(strapi: any) {
     /** Locale a publicar; "*" publica todos os locales disponíveis. */
     locale?: string;
   }) => {
+    // Best practice Strapi 5: publish() só existe com Draft & Publish ligado;
+    // chamar sem D&P lança erro. Sem D&P não há rascunho — a edição já é o vivo.
+    if (!hasDraftAndPublish(uid)) {
+      return {
+        ok: true,
+        uid,
+        documentId,
+        status: 'no-draft-publish',
+        nota: 'Esta content-type não tem Draft & Publish; não há rascunho a publicar — a alteração já está no ar.',
+      };
+    }
     await strapi.documents(uid).publish({ documentId, ...(locale ? { locale } : {}) });
     return { ok: true, uid, documentId, status: 'published', locale };
   };
@@ -374,7 +395,8 @@ export function createContentTools(strapi: any) {
           // upsert idempotente da versão do locale
           await strapi.documents(ct.uid).update({ documentId: e.documentId, locale: tgt, data });
           documentos += 1;
-          if (publish) {
+          // Só publica se a CT tiver Draft & Publish (senão publish() lança erro).
+          if (publish && hasDraftAndPublish(ct.uid)) {
             await strapi.documents(ct.uid).publish({ documentId: e.documentId, locale: tgt });
             publicados += 1;
           }
@@ -439,7 +461,7 @@ export const openAiToolSpecs = [
     type: 'function',
     function: {
       name: 'publicar',
-      description: 'Publica a entrada (torna a alteração visível no site público). Passe "locale" para publicar um idioma específico, ou "*" para todos.',
+      description: 'Publica a entrada (torna a alteração visível no site público). Passe "locale" para publicar um idioma específico, ou "*" para todos. Se a content-type NÃO tiver Draft & Publish, não há o que publicar: retorna status "no-draft-publish" (a edição já está no ar) — avise o usuário em vez de tentar publicar de novo.',
       parameters: {
         type: 'object',
         properties: {
