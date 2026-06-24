@@ -10,11 +10,18 @@ import audioService from './services/audio';
 import routes from './routes';
 import register from './register';
 import { runPendingProvision } from './provision/orchestrate';
-import { stopFrontend } from './provision/runner';
+import { stopFrontend, cleanupStaleFrontend } from './provision/runner';
 
 export default {
   register,
   async bootstrap({ strapi }: { strapi: any }) {
+    // Limpa qualquer dev server do front que tenha sobrado de uma execução
+    // anterior (crash/SIGKILL não roda o destroy). Garante "limpar ao desligar"
+    // mesmo em shutdown sujo e evita o EADDRINUSE no próximo Preview.
+    try {
+      cleanupStaleFrontend(strapi.dirs.app.root);
+    } catch { /* best-effort */ }
+
     // Após um restart causado por um upload de frontend, conclui a provisão:
     // semeia o conteúdo e liga o preview. Idempotente (no-op se não há pendência).
     try {

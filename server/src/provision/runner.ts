@@ -32,6 +32,44 @@ export interface RunInfo {
 let info: RunInfo = { state: 'idle', dir: null, url: null, pm: null, error: null, log: [] };
 let child: ChildProcess | null = null;
 let pollTimer: ReturnType<typeof setInterval> | null = null;
+let appRootForPid: string | null = null;
+
+// ── pidfile: rastreia o PID do dev server p/ matá-lo no shutdown e limpar
+//    órfãos no boot (ex.: após um crash/SIGKILL onde o destroy não rodou). ──
+function pidFilePath(appRoot: string): string {
+  return path.join(appRoot, '.mcp-chat', 'frontend.pid');
+}
+function writePid(pid: number): void {
+  try {
+    if (!appRootForPid) return;
+    const pf = pidFilePath(appRootForPid);
+    fs.mkdirSync(path.dirname(pf), { recursive: true });
+    fs.writeFileSync(pf, String(pid), 'utf8');
+  } catch { /* best-effort */ }
+}
+function clearPid(): void {
+  try {
+    if (appRootForPid) fs.unlinkSync(pidFilePath(appRootForPid));
+  } catch { /* não existia */ }
+}
+function isAlive(pid: number): boolean {
+  try { process.kill(pid, 0); return true; } catch { return false; }
+}
+/**
+ * Mata um dev server órfão deixado por uma execução anterior (crash/SIGKILL não
+ * roda o destroy()). Chamado no bootstrap do plugin — garante "limpar ao
+ * desligar" mesmo quando o shutdown não foi limpo, e evita o EADDRINUSE.
+ */
+export function cleanupStaleFrontend(appRoot: string): void {
+  appRootForPid = appRoot;
+  try {
+    const pf = pidFilePath(appRoot);
+    if (!fs.existsSync(pf)) return;
+    const pid = parseInt(fs.readFileSync(pf, 'utf8').trim(), 10);
+    if (pid && isAlive(pid)) { try { process.kill(pid, 'SIGTERM'); } catch { /* já morto */ } }
+    fs.unlinkSync(pf);
+  } catch { /* best-effort */ }
+}
 
 function detectPM(dir: string): string {
   if (fs.existsSync(path.join(dir, 'bun.lockb')) || fs.existsSync(path.join(dir, 'bun.lock'))) return 'bun';
@@ -55,7 +93,7 @@ function detectFramework(dir: string): 'vite' | 'next' | 'other' {
  *  - 3000 (Next default) e 1337 (Strapi).
  * Evita colisão com o admin do Strapi (que responde 426 a requests não-WS).
  */
-const FRONTEND_BASE_PORT = 4321;
+export const FRONTEND_BASE_PORT = 4321;
 
 /** Acha uma porta TCP livre a partir de `start`, testando em 0.0.0.0 (pega
  *  ocupações em `*:porta` de qualquer interface IPv4). */
@@ -101,11 +139,14 @@ export function stopFrontend(): void {
     try { child.kill('SIGTERM'); } catch { /* ignore */ }
     child = null;
   }
+  clearPid(); // limpa ao desligar — não deixa órfão
   if (info.state !== 'error') info.state = 'idle';
 }
 
 export async function startFrontend(_strapi: any, opts: { dir: string; url: string }): Promise<RunInfo> {
   const { dir } = opts;
+  // raiz da app p/ o pidfile (limpeza de órfãos no boot / shutdown).
+  if (_strapi?.dirs?.app?.root) appRootForPid = _strapi.dirs.app.root;
 
   // idempotente: já rodando/subindo para o mesmo dir
   if (child && info.dir === dir && ['installing', 'starting', 'running'].includes(info.state)) {
@@ -138,12 +179,14 @@ export async function startFrontend(_strapi: any, opts: { dir: string; url: stri
   const startDev = () => {
     info.state = 'starting';
     child = spawnIn(pm, devArgs);
+    if (child.pid) writePid(child.pid); // rastreia p/ limpar no shutdown/boot
     child.stdout?.on('data', (d) => pushLog(d));
     child.stderr?.on('data', (d) => pushLog(d));
     child.on('exit', (code) => {
       // processo morreu → frontend DOWN. Zera o child e libera o estado p/ que
       // apertar Preview de novo reinicie (em vez de ficar preso em "running").
       child = null;
+      clearPid();
       if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
       if (info.state === 'running') info.state = 'idle';
       else { info.state = 'error'; info.error = `dev encerrou (código ${code}). Veja o log.`; }
