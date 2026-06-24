@@ -250,6 +250,37 @@ in place, not recreated) and reducing media/relations to ids.
 
 ## Frontend provisioning
 
+### Step-by-step (from the admin)
+
+> Prerequisites: the plugin installed & enabled, `OPENAI_API_KEY` set, and Strapi
+> running in **`develop`** (schema generation is dev-only). See [Install](#install).
+
+1. **Zip your frontend** and keep the folder at the top of the archive
+   (e.g. `frontend/…`). You can include a `strapi.manifest.json` at its root, or let
+   the plugin infer one from the code. Exclude `node_modules` (the plugin installs deps
+   when it runs the dev server).
+2. In the admin, open **MCP Chat** in the left menu → **Provision frontend**.
+3. **Upload the `.zip`** → click **Analyze project**. The plugin extracts it to a sibling
+   folder and proposes a `strapi.manifest.json` (existing one, or inferred from the code —
+   including data arrays inside components → collection types).
+4. **Review the manifest** (edit if you want) → click **Provision**.
+5. Strapi **restarts** and then, automatically: creates the content-types, **seeds** the
+   content, opens **public read**, wires the **preview** (admin CSP + `CLIENT_URL`), and
+   **wires the frontend to Strapi via live REST fetch**. Don't close the page — it polls
+   until done.
+6. Click the **🖼 Preview** button on the floating chat. The plugin boots your frontend's
+   dev server and shows it docked next to the admin — now reading content from Strapi.
+   Toggle **📝 Draft / 🌐 Live** to preview unpublished changes.
+7. Edit with the **chat** ("change the hero title to …") or in the Content Manager → the
+   preview reloads and reflects it. Drafts stay drafts until you publish (or turn on
+   Auto-publish).
+
+> No `strapi.manifest.json` and no `OPENAI_API_KEY`? Provisioning still models the loose
+> UI text as single-types and wires the preview, but it can't infer data collections or
+> rewire components without the key. Add the key for the full "upload → live" flow.
+
+### Under the hood
+
 Bring a "blessed-stack" frontend (Next.js or TanStack Start) carrying a
 `strapi.manifest.json`. The plugin **never executes code from the upload** — it
 reads and validates the manifest (Zod) and, from it, provisions the backend:
