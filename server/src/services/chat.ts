@@ -26,6 +26,12 @@ type ChatInput = {
   /** URL da página aberta no preview — contexto do "isso aqui". */
   previewUrl?: string | null;
   /**
+   * Status do preview atual: 'draft' (toggle de rascunho ligado) ou 'published'
+   * (live). A busca de texto segue ESTE modo — acha rascunho quando em draft, e
+   * o conteúdo no ar quando em live. Default 'draft'.
+   */
+  previewStatus?: 'draft' | 'published';
+  /**
    * Política de publicação. `false` (default) = modo RASCUNHO: o agente edita o
    * draft e NÃO publica, a menos que o usuário peça explicitamente. `true` =
    * auto-publicar após cada edição (comportamento "live" antigo).
@@ -103,7 +109,7 @@ Be concise and actionable. ALWAYS answer in English.`,
 };
 
 export default ({ strapi }: { strapi: any }) => ({
-  async chat({ messages, image, lang = 'pt', previewUrl, autoPublish = false }: ChatInput) {
+  async chat({ messages, image, lang = 'pt', previewUrl, previewStatus = 'draft', autoPublish = false }: ChatInput) {
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
       throw new Error(
@@ -116,7 +122,7 @@ export default ({ strapi }: { strapi: any }) => ({
     const { buscarTexto, editarCampo, publicar, listarLocales, criarLocale, traduzir } =
       createContentTools(strapi);
     const LOCAL_TOOLS: Record<string, (args: any) => Promise<any>> = {
-      buscar_texto: (a) => buscarTexto(a?.termo),
+      buscar_texto: (a) => buscarTexto(a?.termo, previewStatus),
       editar_campo: (a) => editarCampo(a),
       publicar: (a) => publicar(a),
       listar_locales: () => listarLocales(),

@@ -108,9 +108,11 @@ export function createContentTools(strapi: any) {
   };
 
   const MAX_MATCHES = 100;
-  const buscarTexto = async (termo: string) => {
+  const buscarTexto = async (termo: string, status: 'draft' | 'published' = 'draft') => {
     const needle = String(termo || '').toLowerCase().trim();
     if (!needle) return { erro: 'termo vazio' };
+    // segue o modo do preview: 'draft' busca rascunhos, 'published' busca o que está no ar.
+    const st: 'draft' | 'published' = status === 'published' ? 'published' : 'draft';
     const matches: any[] = [];
     for (const ct of apiContentTypes() as any[]) {
       if (matches.length >= MAX_MATCHES) break; // teto: não varre além do necessário
@@ -120,7 +122,7 @@ export function createContentTools(strapi: any) {
       try {
         const res = await strapi
           .documents(ct.uid)
-          .findMany({ status: 'draft', populate, limit: 200 });
+          .findMany({ status: st, populate, limit: 200 });
         entries = Array.isArray(res) ? res : res ? [res] : [];
       } catch {
         continue;
