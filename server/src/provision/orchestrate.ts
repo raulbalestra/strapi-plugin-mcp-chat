@@ -6,8 +6,9 @@ import { writeApis, requestReload, type WriteResult } from './write';
 export { requestReload };
 import { seedContent, type SeedResult } from './seed';
 import { linkFrontend, type LinkResult } from './link';
+import { FRONTEND_BASE_PORT } from './runner';
 import { grantPublicRead, type PermissionsResult } from './permissions';
-import { adapterForManifest, type LinkContext } from './adapters';
+import { type LinkContext } from './adapters';
 import { apiUid } from './generate';
 
 /**
@@ -206,9 +207,9 @@ export async function runPendingProvision(
 
   // grava o resumo de conclusão para a UI anunciar "preview pronto".
   try {
-    const adapter = adapterForManifest(marker.manifest);
+    // mesma porta do runner (onde o dev server realmente sobe), p/ o preview bater.
     const previewUrl =
-      marker.context.frontendUrl || `http://localhost:${adapter.defaultPort}`;
+      marker.context.frontendUrl || `http://localhost:${FRONTEND_BASE_PORT}`;
     const done: ProvisionDone = {
       name: marker.manifest.name,
       framework: marker.manifest.framework,
