@@ -61,6 +61,12 @@ export default {
         handler: 'frontend.integrate',
         config: { policies: [] },
       },
+      {
+        method: 'POST',
+        path: '/frontend/wire',
+        handler: 'frontend.wire',
+        config: { policies: [] },
+      },
     ],
   },
 };

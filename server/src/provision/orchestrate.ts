@@ -6,6 +6,7 @@ import { writeApis, requestReload, type WriteResult } from './write';
 export { requestReload };
 import { seedContent, type SeedResult } from './seed';
 import { linkFrontend, type LinkResult } from './link';
+import { wireFrontend, type WireResult } from './wire';
 import { FRONTEND_BASE_PORT } from './runner';
 import { grantPublicRead, type PermissionsResult } from './permissions';
 import { type LinkContext } from './adapters';
@@ -161,6 +162,7 @@ export interface RunPendingResult {
   seed?: SeedResult;
   link?: LinkResult;
   permissions?: PermissionsResult;
+  wire?: WireResult;
   errors: string[];
 }
 
@@ -203,6 +205,17 @@ export async function runPendingProvision(
     });
   } catch (e: any) {
     result.errors.push(`link: ${e?.message ?? e}`);
+  }
+  // religação live-fetch: gera a camada de dados + religa os componentes (best-effort;
+  // só escreve no frontend, com .bak + validação de sintaxe — nunca quebra a Strapi).
+  try {
+    result.wire = await wireFrontend(strapi, {
+      frontendDir: marker.frontendDir,
+      manifest: marker.manifest,
+    });
+    if (result.wire.errors.length) result.errors.push(...result.wire.errors.map((e) => `wire: ${e}`));
+  } catch (e: any) {
+    result.errors.push(`wire: ${e?.message ?? e}`);
   }
 
   // grava o resumo de conclusão para a UI anunciar "preview pronto".

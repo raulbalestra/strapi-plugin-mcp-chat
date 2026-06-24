@@ -5,6 +5,7 @@ import { stageProvision, getProvisionStatus } from '../provision/orchestrate';
 import { inferManifest } from '../provision/infer';
 import { startFrontend, getRunStatus } from '../provision/runner';
 import { integrateFrontend } from '../provision/integrate';
+import { wireFrontend } from '../provision/wire';
 import { validateManifest } from '../provision/manifest';
 import type { LinkContext } from '../provision/adapters';
 
@@ -311,5 +312,39 @@ export default {
     if (!v.ok) return ctx.badRequest({ message: 'Manifest inválido', errors: v.errors });
 
     ctx.body = await integrateFrontend(strapi, { frontendDir, manifest: v.data });
+  },
+
+  /**
+   * Religa o frontend à Strapi por FETCH AO VIVO: gera a camada de dados (REST,
+   * flat) e religa os componentes (com .bak + fallback + sanidade). Só escreve no
+   * frontend, nunca na Strapi. Usa o último provisionado por padrão.
+   */
+  async wire(ctx: any) {
+    const strapi = ctx.strapi ?? (global as any).strapi;
+    if (!devOnly(ctx)) return;
+
+    const body = ctx.request.body || {};
+    let frontendDir: string = body.frontendDir;
+    if (!frontendDir) {
+      const st = getProvisionStatus(strapi.dirs.app.root);
+      frontendDir = st.done?.frontendDir || '';
+    }
+    if (!frontendDir) return ctx.badRequest('Nenhum frontend provisionado.');
+
+    const parent = path.resolve(strapi.dirs.app.root, '..');
+    if (!ensureInside(parent, frontendDir) || !fs.existsSync(frontendDir)) {
+      return ctx.badRequest('Pasta do frontend inválida.');
+    }
+
+    let manifest: any;
+    try {
+      manifest = JSON.parse(fs.readFileSync(path.join(frontendDir, MANIFEST_NAME), 'utf8'));
+    } catch {
+      return ctx.badRequest('Manifest do projeto não encontrado (rode a provisão primeiro).');
+    }
+    const v = validateManifest(manifest);
+    if (!v.ok) return ctx.badRequest({ message: 'Manifest inválido', errors: v.errors });
+
+    ctx.body = await wireFrontend(strapi, { frontendDir, manifest: v.data });
   },
 };
