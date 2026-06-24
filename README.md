@@ -23,7 +23,7 @@ https://github.com/raulbalestra/strapi-plugin-mcp-chat
 - 🎙️ **Voice** — record a request (Whisper STT) and hear replies (OpenAI TTS).
 - 👁️ **Side-by-side preview panel** — the plugin's own docked iframe that shrinks the admin and shows your frontend; reloads after each edit and **stays on the same page + scroll position** (with the optional preview bridge below). This is a custom panel, *not* Strapi's official Live Preview (which is a Growth/Enterprise feature) — it works on any plan, including Community, and complements the official Preview if you have it configured.
 - 🖥️ **Optional browser control** — if a [Playwright MCP](https://github.com/microsoft/playwright-mcp) server is reachable, the agent can drive a real browser to verify changes.
-- 🧱 **Frontend provisioning** — upload your frontend (Next.js or TanStack Start) with a `strapi.manifest.json`; the plugin validates it, creates all content-types, seeds content and wires the preview. Never runs code from the upload — it acts only on the validated manifest.
+- 🧱 **Frontend provisioning** — upload your frontend (Next.js or TanStack Start) with a `strapi.manifest.json`; the plugin validates it, creates all content-types, seeds content and wires the preview. The manifest can also be **inferred from the code** (incl. data arrays hardcoded inside components → collection types), and provisioning then **auto-connects the frontend to Strapi via live REST fetch** (generates a data layer + rewires components, with a hardcoded fallback). Never runs code from the upload — it acts only on the validated manifest.
 - 🌍 **Translate every page to any language** — create locales and translate all localized content via Strapi 5's native i18n, with **no length limits and no context blowups** (see below).
 - 🌐 **Fully bilingual (PT / EN)** — both the AI prompts/voice *and* the plugin's own admin pages, switchable with one click (the choice is shared across the chat and the menu pages).
 - 🎓 **Built-in onboarding tour** — a first-run mini-course (re-openable any time via **❓ Tour**) walks new users through chat, editing, live preview, provisioning and translation.
@@ -213,7 +213,8 @@ respects that:
 **Draft preview contract (for custom / non-provisioned frontends):** when the iframe URL
 carries `?preview=1` (or `?status=draft`), fetch Strapi with `status: 'draft'` and an API
 token that can read drafts (`STRAPI_API_TOKEN`). Provisioned frontends get this wired
-automatically via the generated `strapi-client` data module. Note: draft fetching keys off
+automatically via the generated data layer (`src/lib/strapi.ts` + `src/hooks/useStrapi.ts`),
+which reads the `?preview=1`/`?status=draft` flag from the URL. Note: draft fetching keys off
 the URL on the **client**, so with SSR the first server render may show published content
 until hydration — fine for preview, but don't rely on it for production rendering.
 
@@ -256,14 +257,41 @@ reads and validates the manifest (Zod) and, from it, provisions the backend:
 ```
 upload  →  validate manifest  →  extract to ../<frontend>
         →  generate src/api/**/schema.json (additive)  →  Strapi restarts
-        →  seed content (Document Service)  →  wire .env + types + preview
+        →  seed content (Document Service)  →  grant public read
+        →  wire .env + types + preview (admin.ts + CSP + CLIENT_URL)
+        →  wire frontend to Strapi (live REST fetch)
 ```
 
 Safety rails: schema generation runs **only in `develop`** (a Content-Type
 Builder limitation); generation is **additive** (never drops/alters an existing
 type); the frontend always lands in a **sibling folder**, never inside Strapi's
 `src/`. Ready-to-use starters live in [`starters/`](./starters). The manifest can
-also be **inferred from the frontend code** (e.g. Figma/Lovable exports).
+also be **inferred from the frontend code** (e.g. Figma/Lovable exports) — including
+data arrays hardcoded inside components, which are modeled as collection types (a
+deterministic guard drops any value that isn't found verbatim in the source, so the
+AI can only transcribe, never invent).
+
+### Live-fetch wiring (the frontend becomes "live")
+
+The last step connects the frontend to Strapi by **live REST fetch** (not a
+snapshot), so editing in Strapi reflects in the page:
+
+- Generates a tiny, dependency-free **data layer** in the frontend —
+  `src/lib/strapi.ts` (REST helpers, flat — no `populate`/nesting, light calls) and
+  `src/hooks/useStrapi.ts` (`useSection` / `useCollection`, preview/draft aware).
+- **Rewires the components** to read from Strapi with a **hardcoded fallback**
+  (`{c.field ?? "original text"}`), leaving icons/assets/layout untouched.
+- **Safe by construction:** every rewritten file is syntax-validated (esbuild, with one
+  retry) and backed up as `.bak`; on any doubt the file is left as-is, so the frontend
+  never fails to compile because of the plugin. It **only writes inside the frontend
+  folder — never touches Strapi.**
+- Runs automatically after provisioning, and is also exposed as `POST
+  /mcp-chat/frontend/wire`. It's **idempotent** (components already wired are skipped).
+
+> **Needs `OPENAI_API_KEY`** for the two AI steps (inferring collections + rewiring
+> components). Without the key, provisioning still creates the text single-types and
+> generates the data layer, but **does not rewire the components** (the frontend stays
+> hardcoded).
 
 ## Translation (i18n)
 
