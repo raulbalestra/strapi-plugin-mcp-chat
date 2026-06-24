@@ -80,32 +80,53 @@ interface CollectResult {
   tree: string[];
 }
 
-/** Coleta os arquivos de código mais promissores (com conteúdo) + árvore. */
+/** Detecta um array de objetos declarado inline (ex.: `const services = [{...}]`),
+ *  inclusive DENTRO de componentes — é onde os frontends Lovable/Figma guardam
+ *  os dados (serviços, avaliações, etc.). */
+function hasInlineDataArray(content: string): boolean {
+  return /(?:export\s+)?const\s+\w+\s*(?::[^=\n]+)?=\s*\[\s*\{/.test(content);
+}
+
+/**
+ * Coleta os arquivos de código mais promissores (com conteúdo) + árvore.
+ *
+ * Ciente de conteúdo: além da pontuação por caminho, dá um bônus forte a QUALQUER
+ * arquivo que contenha um array de objetos inline — assim componentes (.tsx/.jsx)
+ * com `const X = [{...}]` entram na análise (antes eram excluídos por serem
+ * componentes, e os dados embutidos neles nunca eram modelados).
+ */
 function collectFiles(frontendDir: string): CollectResult {
   const all: string[] = [];
   walk(frontendDir, frontendDir, all);
-
   const tree = all.slice().sort();
-  // candidatos com conteúdo de array/objeto exportado, por pontuação
-  const ranked = all
-    .map((rel) => ({ rel, s: score(rel) }))
-    .filter((x) => x.s > 0)
-    .sort((a, b) => b.s - a.s);
+
+  // lê e pontua cada candidato (pontuação por caminho + bônus por dados inline).
+  const scored: { rel: string; content: string; s: number }[] = [];
+  for (const rel of all) {
+    let content: string;
+    try {
+      content = fs.readFileSync(path.join(frontendDir, rel), 'utf8');
+    } catch {
+      continue;
+    }
+    const dataArray = hasInlineDataArray(content);
+    const hasExport = /export\s+(const|default|type|interface)/.test(content);
+    if (!hasExport && !dataArray) continue; // sem dados nem exports → ignora
+    let s = score(rel);
+    if (dataArray) s += 8; // arrays de objetos inline valem muito (incl. componentes)
+    if (s <= 0) continue;
+    scored.push({ rel, content, s });
+  }
+  scored.sort((a, b) => b.s - a.s);
 
   const files: { rel: string; content: string }[] = [];
   let total = 0;
-  for (const { rel } of ranked) {
+  for (const it of scored) {
     if (files.length >= MAX_FILES || total >= MAX_TOTAL_CHARS) break;
-    try {
-      let content = fs.readFileSync(path.join(frontendDir, rel), 'utf8');
-      // só interessa se houver dados estruturados ou tipos
-      if (!/export\s+(const|default|type|interface)/.test(content)) continue;
-      if (content.length > MAX_FILE_CHARS) content = content.slice(0, MAX_FILE_CHARS) + '\n/* …truncado… */';
-      files.push({ rel, content });
-      total += content.length;
-    } catch {
-      /* ignore */
-    }
+    let content = it.content;
+    if (content.length > MAX_FILE_CHARS) content = content.slice(0, MAX_FILE_CHARS) + '\n/* …truncado… */';
+    files.push({ rel: it.rel, content });
+    total += content.length;
   }
   return { files, tree };
 }
@@ -341,13 +362,15 @@ Gere um JSON "strapi.manifest.json" com ESTE formato:
 
 REGRAS:
 - Crie uma content-type para cada COLEÇÃO de dados (arrays de objetos). Use os MESMOS nomes de campo do código.
+- IMPORTANTE: muitos frontends guardam os dados em arrays declarados INLINE dentro de componentes (.tsx/.jsx), ex.: \`const services = [{ name, price, desc }]\`, \`const reviews = [...]\`, \`const hours = [...]\`. TRATE esses arrays como coleções e modele cada um como um collectionType, mesmo que estejam dentro de um componente de UI.
+- Ao modelar um array desses, inclua SOMENTE os campos que são dados/texto (ex.: name, price, desc, label, href, value). IGNORE props que são código/apresentação: componentes de ícone (ex.: \`icon: Scissors\`), elementos React, funções, classes CSS, imports de imagem.
 - Dados de "configuração do site" (objeto único: nome, telefone, etc.) → singleType.
 - Campos string longos/descrições → "text" ou "richtext". Listas de strings → "json".
 - Use "date"/"datetime" SOMENTE para datas ISO completas (YYYY-MM-DD). Datas parciais como "2025-04" ou textos livres → use "string" (senão o seed falha).
 - Imagens (imports de assets ou caminhos) → "media" (NÃO coloque o valor da imagem no seed; omita o campo no seed).
-- Em "seed", extraia o conteúdo REAL hardcoded no código, omitindo campos de mídia e relações.
+- Em "seed", copie o conteúdo REAL hardcoded no código, VERBATIM (exatamente como está, sem reescrever, traduzir ou inventar), omitindo campos de mídia e relações. Todo valor de seed TEM que existir literalmente no código fornecido.
 - Foque APENAS em coleções/objetos de dados — NÃO precisa modelar textos soltos de UI (isso é tratado à parte).
-- NÃO invente. singularName kebab-case, sem repetir. Relações só apontam para types definidos por você.
+- NÃO invente NADA. Se não tiver certeza de um valor, omita-o. singularName kebab-case, sem repetir. Relações só apontam para types definidos por você.
 - Se não houver coleções de dados, devolva contentTypes: [] e seed: [].
 - Responda APENAS com o JSON, nada de markdown.
 
@@ -463,6 +486,55 @@ export async function inferManifest(
     }
   } else if (!apiKey) {
     result.warnings.push('Sem OPENAI_API_KEY: modelando os TEXTOS (determinístico); coleções de dados não inferidas.');
+  }
+
+  // 3b) TRAVA ANTI-ALUCINAÇÃO (determinística): todo valor de seed gerado pela IA
+  //     TEM que existir literalmente no código analisado. Construímos um "haystack"
+  //     com o código-fonte real (não truncado) e descartamos entradas cujo conteúdo
+  //     não aparece nele. Assim a IA não consegue inventar dados — só transcrever.
+  if (dataCts.length && dataSeed.length) {
+    const parts: string[] = [];
+    for (const f of collected.files) {
+      try {
+        parts.push(fs.readFileSync(path.join(frontendDir, f.rel), 'utf8'));
+      } catch {
+        parts.push(f.content);
+      }
+    }
+    const norm = (x: any) => String(x).toLowerCase().replace(/[^a-z0-9]+/g, '');
+    const hay = norm(parts.join('\n'));
+    const present = (v: any) => {
+      if (typeof v !== 'string') return false;
+      const n = norm(v);
+      return n.length >= 4 && hay.includes(n); // valores curtos não são distintivos
+    };
+
+    const keep = new Set<string>();
+    const verifiedSeed: any[] = [];
+    let droppedEntries = 0;
+    for (const grp of dataSeed) {
+      const entries = (grp.entries ?? []).filter((e: any) => {
+        const ok = Object.values(e).some(present);
+        if (!ok) droppedEntries++;
+        return ok;
+      });
+      if (entries.length) {
+        verifiedSeed.push({ ...grp, entries });
+        keep.add(grp.singularName);
+      }
+    }
+    // coleções de dados sem NENHUMA entrada verificada são provável alucinação → fora.
+    const verifiedCts = dataCts.filter(
+      (ct: any) => ct.kind === 'singleType' || keep.has(ct.singularName)
+    );
+    const droppedCts = dataCts.length - verifiedCts.length;
+    if (droppedEntries || droppedCts) {
+      result.warnings.push(
+        `Anti-alucinação: descartei ${droppedEntries} entrada(s) e ${droppedCts} content-type(s) cujos valores não batiam com o código.`
+      );
+    }
+    dataCts = verifiedCts;
+    dataSeed = verifiedSeed;
   }
 
   // 4) TEXTOS via extração DETERMINÍSTICA (garantido, sem IA, escala em qualquer tamanho)
