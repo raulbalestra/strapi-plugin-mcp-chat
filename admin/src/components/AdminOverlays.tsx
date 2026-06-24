@@ -197,26 +197,16 @@ export const AdminOverlays = () => {
       <FloatingChat
         previewOn={previewOn}
         previewUrl={liveHref}
+        draft={draftPreview}
         onTogglePreview={() => setPreviewOn((v) => !v)}
-        onReply={async (didWrite) => {
+        onReply={(didWrite) => {
           if (!previewOn) return;
-          // Houve edição no Strapi: re-sincroniza o snapshot do frontend para o
-          // preview refletir (a fonte da verdade é o Strapi). Se não for snapshot
-          // ou não houver provisão, o integrate é no-op e só recarregamos.
-          if (didWrite) {
-            try {
-              setRunError(false);
-              setRunText('Sincronizando alterações…');
-              setRunLoading(true);
-              const { post } = getFetchClient();
-              await post('/mcp-chat/frontend/integrate', {});
-            } catch {
-              /* sem integração: segue só com reload */
-            } finally {
-              setRunLoading(false);
-            }
-          }
-          reload();
+          // Modelo LIVE-FETCH: a Strapi é a fonte da verdade e o front SEMPRE
+          // busca dela. A edição do chat já foi gravada na Strapi (no campo
+          // exato, via editar_campo) — aqui só recarregamos o preview para o
+          // front re-buscar (em draft quando o toggle de rascunho está ligado).
+          // NÃO reescrevemos arquivos do frontend (nada de snapshot/integrate).
+          if (didWrite) reload();
         }}
       />
     </>

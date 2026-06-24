@@ -13,6 +13,8 @@ type Pos = { x: number; y: number };
 type Props = {
   previewOn: boolean;
   previewUrl: string;
+  /** modo do preview: true = rascunho (draft), false = publicado (live). */
+  draft?: boolean;
   onTogglePreview: () => void;
   /** chamado após uma resposta; didWrite indica que houve edição no Strapi. */
   onReply: (didWrite: boolean) => void;
@@ -28,6 +30,7 @@ const STR: Record<Lang, Record<string, string>> = {
     rec: '🎤 Enviar áudio', recStop: '⏹ Parar áudio', recTitle: 'Gravar áudio e enviar (transcreve e manda)',
     previewOn: '🖼 Preview: ON', previewOff: '🖼 Preview: OFF', previewTitle: 'Abrir/fechar o preview do site ao lado da Strapi',
     voiceOn: '🔊 Voz: ON', voiceOff: '🔈 Voz: OFF', voiceTitle: 'Ler as respostas em voz alta (TTS)',
+    stopVoice: '⏹ Parar voz', stopVoiceTitle: 'Parar a voz que está tocando',
     pubOn: '🚀 Publicar: ON', pubOff: '📝 Rascunho', pubTitle: 'Auto-publicar OFF = a IA só salva rascunho (você revisa e publica). ON = publica direto no site.',
     shareOn: '🛑 Parar tela', shareOff: '🖥 Compart. tela', shareTitle: 'Compartilhar a tela com a IA',
     langTitle: 'Idioma do chat e da voz (PT-BR ↔ English)',
@@ -45,6 +48,7 @@ const STR: Record<Lang, Record<string, string>> = {
     rec: '🎤 Send audio', recStop: '⏹ Stop audio', recTitle: 'Record audio and send (transcribes and sends)',
     previewOn: '🖼 Preview: ON', previewOff: '🖼 Preview: OFF', previewTitle: 'Toggle the site preview next to Strapi',
     voiceOn: '🔊 Voice: ON', voiceOff: '🔈 Voice: OFF', voiceTitle: 'Read replies out loud (TTS)',
+    stopVoice: '⏹ Stop voice', stopVoiceTitle: 'Stop the voice currently playing',
     pubOn: '🚀 Publish: ON', pubOff: '📝 Draft', pubTitle: 'Auto-publish OFF = the AI only saves a draft (you review and publish). ON = publishes straight to the site.',
     shareOn: '🛑 Stop screen', shareOff: '🖥 Share screen', shareTitle: 'Share your screen with the AI',
     langTitle: 'Chat and voice language (PT-BR ↔ English)',
@@ -59,7 +63,7 @@ const STR: Record<Lang, Record<string, string>> = {
   },
 };
 
-export const FloatingChat = ({ previewOn, previewUrl, onTogglePreview, onReply }: Props) => {
+export const FloatingChat = ({ previewOn, previewUrl, draft = false, onTogglePreview, onReply }: Props) => {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<Pos | null>(null); // null = ancorado à direita
   const [messages, setMessages] = useState<Msg[]>([]);
@@ -67,6 +71,7 @@ export const FloatingChat = ({ previewOn, previewUrl, onTogglePreview, onReply }
   const [loading, setLoading] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [voiceOn, setVoiceOn] = useState(false);
+  const [speaking, setSpeaking] = useState(false);
   const [recording, setRecording] = useState(false);
   const [autoPublish, setAutoPublish] = useState<boolean>(() => {
     try { return localStorage.getItem('mcp-chat-autopublish') === '1'; } catch { return false; }
@@ -87,6 +92,7 @@ export const FloatingChat = ({ previewOn, previewUrl, onTogglePreview, onReply }
   const chunksRef = useRef<Blob[]>([]);
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<{ dx: number; dy: number } | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   // ── Drag ────────────────────────────────────────────────────────────────
   const onHeaderDown = (e: React.MouseEvent) => {
@@ -119,6 +125,38 @@ export const FloatingChat = ({ previewOn, previewUrl, onTogglePreview, onReply }
       try { streamRef.current?.getTracks().forEach((t) => t.stop()); } catch { /* noop */ }
       try { recorderRef.current?.stop(); } catch { /* noop */ }
     };
+  }, []);
+
+  // ── Logout: limpa a conversa e esconde o chat ──────────────────────────────
+  // O overlay vive num React root próprio (fora da árvore do admin), então não dá
+  // pra usar useAuth. Detectamos a sessão pela ROTA: a tela de login/logout do
+  // Strapi é /admin/auth/... Ao cair nela (logout), zeramos a conversa, encerramos
+  // áudio/gravação/compartilhamento e escondemos o FAB — o chat só existe logado.
+  const [loggedOut, setLoggedOut] = useState(() => /\/auth(\/|$)/.test(window.location.pathname));
+  useEffect(() => {
+    const check = () => {
+      const out = /\/auth(\/|$)/.test(window.location.pathname);
+      setLoggedOut((prev) => {
+        if (out && !prev) {
+          // acabou de deslogar → limpa tudo que é da sessão.
+          setMessages([]);
+          setInput('');
+          setError(null);
+          setOpen(false);
+          stopTTS();
+          try { streamRef.current?.getTracks().forEach((t) => t.stop()); } catch { /* noop */ }
+          try { recorderRef.current?.stop(); } catch { /* noop */ }
+          setSharing(false);
+          setRecording(false);
+        }
+        return out;
+      });
+    };
+    check();
+    const id = window.setInterval(check, 1000);
+    window.addEventListener('popstate', check);
+    return () => { window.clearInterval(id); window.removeEventListener('popstate', check); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ── Screenshare ───────────────────────────────────────────────────────────
@@ -159,14 +197,33 @@ export const FloatingChat = ({ previewOn, previewUrl, onTogglePreview, onReply }
   };
 
   // ── TTS ────────────────────────────────────────────────────────────────────
+  // Para qualquer áudio em reprodução (botão ⏹ ou ao iniciar uma nova fala).
+  const stopTTS = () => {
+    const a = audioRef.current;
+    if (a) {
+      try { a.pause(); a.currentTime = 0; } catch { /* noop */ }
+      audioRef.current = null;
+    }
+    setSpeaking(false);
+  };
+
   const playTTS = async (text: string) => {
     try {
+      stopTTS(); // não sobrepõe falas
       const { post } = getFetchClient();
       const { data } = await post('/mcp-chat/tts', { text });
       const audio = new Audio(`data:${data.content_type};base64,${data.audio_base64}`);
-      await audio.play().catch(() => undefined);
-    } catch { /* voz é opcional */ }
+      audioRef.current = audio;
+      const done = () => { if (audioRef.current === audio) audioRef.current = null; setSpeaking(false); };
+      audio.addEventListener('ended', done);
+      audio.addEventListener('error', done);
+      setSpeaking(true);
+      await audio.play().catch(() => done());
+    } catch { setSpeaking(false); /* voz é opcional */ }
   };
+
+  // para a voz se o componente desmontar.
+  useEffect(() => () => stopTTS(), []);
 
   // ── Enviar ──────────────────────────────────────────────────────────────────
   const sendMessage = async (text: string) => {
@@ -185,6 +242,8 @@ export const FloatingChat = ({ previewOn, previewUrl, onTogglePreview, onReply }
         // Página que o usuário está olhando no preview (se aberto). Dá à IA o
         // contexto do "isso aqui" sem precisar varrer o site inteiro.
         previewUrl: previewOn ? previewUrl : null,
+        // A busca de texto segue o modo do preview: draft -> rascunhos, live -> publicado.
+        previewStatus: draft ? 'draft' : 'published',
         // Draft-first: por padrão a IA só salva rascunho; só publica com isto ON.
         autoPublish,
       });
@@ -262,6 +321,9 @@ export const FloatingChat = ({ previewOn, previewUrl, onTogglePreview, onReply }
     fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap',
   });
 
+  // deslogado: o chat não existe (já foi limpo no efeito acima).
+  if (loggedOut) return null;
+
   if (!open) {
     return (
       <button
@@ -337,6 +399,11 @@ export const FloatingChat = ({ previewOn, previewUrl, onTogglePreview, onReply }
           title={t.voiceTitle}>
           {voiceOn ? t.voiceOn : t.voiceOff}
         </button>
+        {speaking && (
+          <button style={btn(true)} onClick={stopTTS} title={t.stopVoiceTitle}>
+            {t.stopVoice}
+          </button>
+        )}
         <button style={btn(autoPublish)} onClick={() => setAutoPublish((v) => !v)}
           title={t.pubTitle}>
           {autoPublish ? t.pubOn : t.pubOff}
